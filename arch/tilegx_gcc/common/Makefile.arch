@@ -1,0 +1,81 @@
+#
+# Makefile for TILE-Gx architecture
+#
+
+ARCHDIR = $(SRCDIR)/arch/$(ARCH)_$(TOOL)/common
+
+#
+# Target system of GNU toolchain
+#
+GCC_TARGET = tile
+
+#
+# Compiler options
+#
+#HIDDEN_OBJS += hvglue.o start.o
+#START_OBJS += hvglue.o start.o main.o
+KERNEL_COBJS += main.o arch_config.o arch_timer.o arch_ipi.o arch_syscall.o arch_debug.o arch_debug_perf.o
+KERNEL_ASMOBJS += hvglue.o intvec_64.o start.o arch_support.o
+KERNEL_DIR  += $(ARCHDIR) \
+			   $(ARCHDIR)/linux-4.5/arch/tile/kernel
+INCLUDES    += \
+               -I$(TILERA_ROOT)/tile/usr/lib/gcc/tilegx-redhat-linux/4.4.4/include \
+               -I$(ARCHDIR) \
+               -I$(ARCHDIR)/linux-4.5/arch/tile/include \
+               -I$(ARCHDIR)/linux-4.5/arch/tile/include/uapi \
+			   -I$(ARCHDIR)/tilera/src/sys/hv/include
+COPTS       += -std=gnu99 -nostdinc
+CDEFS       += -DCONFIG_KERNEL_PL=2 -D__tilegx__
+
+#
+# Common configurations
+#
+CDEFS += -DG_SYSLOG
+CDEFS += -DTOPPERS_SYSTIM_LOCAL
+CDEFS += -DTTYPE_KLOCK=F_KLOCK
+CDEFS += -DSUPPORT_MANY_CORE_AFFINITY
+#CDEFS += -DDEBUG_CPU_USAGE
+#CDEFS += -DDEBUG_PERF
+# TODO: small logtask stack size may cause stack overflow?
+CDEFS += -DLOGTASK_STACK_SIZE=8192 -DTCNT_SYSLOG_BUFFER=4096 -DTCNT_TRACE_BUFFER=100000
+CDEFS += -DUSE_GCC_BUILTIN_CAS
+
+#
+# Optimize configurations
+# TODO: should be somewhere else
+#
+#CDEFS += -DSUPPORT_GET_P_RUNTSK_FAST
+#CDEFS += -DSUPPORT_GET_P_RUNTSK_SPR
+#CDEFS += -DOPTIMIZE_PAGE_TABLE=0
+#CDEFS += -DOPTIMIZE_PAGE_TABLE=2
+
+#
+# System services
+#
+SYSSVC_DIR += $(ARCHDIR)/syssvc
+SYSSVC_COBJS += my_syslog.o my_serial.o my_logtask.o \
+				arch_serial.o serial_mod.o
+
+# Trace logger definitions
+ifeq ($(ENABLE_TRACE),true)
+      COPTS        := $(COPTS) -DTOPPERS_ENABLE_TRACE
+      KERNEL_DIR   := $(KERNEL_DIR) $(SRCDIR)/arch/logtrace
+      KERNEL_COBJS := $(KERNEL_COBJS) trace_config.o trace_dump.o
+endif
+
+#
+# Linker options
+#
+LDFLAGS  += -nostdlib -nostdinc
+LDSCRIPT := $(ARCHDIR)/tilegx.ld
+LIBS     += -lgcc
+
+#$(LDSCRIPT):  %.ld: %.ld.S
+#	$(CPP) -D__ASSEMBLY__ $(INCLUDES) -P -C $< -o $@
+
+CFG_TABS += --cfg1-def-table $(ARCHDIR)/arch_def.csv
+
+#
+# Template file for generating offset
+#
+OFFSET_TF = $(ARCHDIR)/arch_offset.tf

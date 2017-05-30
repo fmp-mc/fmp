@@ -1,0 +1,94 @@
+#
+#  @(#) $Id: Makefile.target 542 2010-02-24 09:59:10Z ertl-honda $
+# 
+
+#
+#		Makefile のターゲット依存部（NaviEngine用）
+#
+
+#
+#  ボード名の定義
+#
+BOARD = naviengine
+
+#
+#  GCC用のファイルのディレクトリ
+#
+TARGETDIR_GCC := $(SRCDIR)/target/$(BOARD)_gcc
+
+#
+#  MPCoreの種類の定義
+#
+MPCORE_TYPE = ARM11
+
+#
+# コンパイラ，アセンブラ，リンカ共通オプション
+#
+TARGET_COMMON_OPTS :=
+
+#
+#  コンパイルオプション
+#
+COPTS := $(COPTS) $(TARGET_COMMON_OPTS)
+LDFLAGS := $(LDFLAGS) $(TARGET_COMMON_OPTS)
+INCLUDES := $(INCLUDES) -I$(TARGETDIR)
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIR := $(KERNEL_DIR) $(TARGETDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) naviengine.o target_config.o
+
+#
+#  システムサービスに関する定義
+#
+SYSSVC_DIR := $(SYSSVC_DIR) $(TARGETDIR)
+SYSSVC_COBJS := $(SYSSVC_COBJS) target_serial.o ns16550.o
+
+#
+#  トレースログ記録のサンプルコードに関する定義
+#
+ifeq ($(ENABLE_TRACE),true)
+      COPTS := $(COPTS) -DTOPPERS_ENABLE_TRACE
+      KERNEL_DIR := $(KERNEL_DIR) $(SRCDIR)/arch/logtrace
+      KERNEL_COBJS := $(KERNEL_COBJS) trace_config.o trace_dump.o
+endif
+
+#
+#  リンカスクリプト(スキャッターファイル)の定義
+#
+SCATTER = $(TARGETDIR)/naviengine.scat
+LDFLAGS := $(LDFLAGS) --scatter=$(SCATTER)
+
+#
+#  スタートアップモジュールに関する定義
+#
+START_OBJS = start.o
+
+$(START_OBJS): %.o: %.sx
+	$(CC) -c $(CFLAGS) $(KERNEL_CFLAGS) $<
+
+$(START_OBJS:.o=.d): %.d: %.sx
+	@$(PERL) $(SRCDIR)/utils/makedep -C $(CC) $(MAKEDEP_OPTS) \
+		-O "$(CFLAGS) $(KERNEL_CFLAGS)" $< >> Makefile.depend
+
+LDFLAGS := $(LDFLAGS) --entry=start
+
+#
+#  依存関係の定義
+#
+kernel_cfg.timestamp: $(TARGETDIR)/target.tf
+$(OBJFILE): $(TARGETDIR_GCC)/target_check.tf
+
+#
+#  チップ依存部のインクルード
+#
+include $(SRCDIR)/arch/arm_armcc/mpcore/Makefile.chip
+
+
+#
+#  同じファイルがあった場合にARMCC依存部のファイルを使用するようにするに，
+#  GCC依存部のファイルを後で指定する．
+#
+INCLUDES := $(INCLUDES) -I$(TARGETDIR_GCC)
+KERNEL_DIR := $(KERNEL_DIR) $(TARGETDIR_GCC)

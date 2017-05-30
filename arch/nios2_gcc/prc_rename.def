@@ -1,0 +1,27 @@
+# prc_config.c
+x_config_int
+int_bitmap_search_table
+prc_initialize
+prc_terminate
+start_sync
+default_exc_handler
+default_int_handler
+
+# prc_support.S
+exception_entry
+ret_int
+ret_exc
+start_r
+dispatch
+start_dispatch
+exit_and_dispatch
+call_exit_kernel
+exit_and_migrate
+dispatch_and_migrate
+
+#kernel_cfg.c
+p_npcb_table
+p_inh_table
+p_iipm_mask_table
+p_inh_iipm_table
+p_exch_table

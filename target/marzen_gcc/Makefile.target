@@ -1,0 +1,137 @@
+#
+#  @(#) $Id: Makefile.target 943 2012-10-19 07:50:40Z ertl-honda $
+# 
+
+#
+#		Makefile のターゲット依存部（Marzen）
+#
+
+#
+# 使用するUARTの指定
+#
+ifeq ($(SAFEG),SECURE)
+SCIF_NO = 4
+else
+SCIF_NO = 2
+endif
+#
+# 使用するシステムタイマーの指定
+#
+ifeq ($(SAFEG),SECURE)
+#SYSTIMER_TYPE = INT_TIMER
+SYSTIMER_TYPE = EXT_TIMER
+else
+SYSTIMER_TYPE = INT_TIMER
+#SYSTIMER_TYPE = EXT_TIMER
+endif
+
+#
+# BASEアドレス
+# 
+ifeq ($(SAFEG),SECURE)
+BASE_ADDR = 0x9e000000
+else
+BASE_ADDR = 0x80000000
+endif
+
+#
+#  ボード名の定義
+#
+BOARD = marzen
+
+#
+#  MPCoreの種類の定義
+#
+MPCORE_TYPE = CA9
+
+#
+#  コンパイルオプション
+#
+INCLUDES := $(INCLUDES) -I$(TARGETDIR)
+COPTS := $(COPTS) -mlittle-endian
+LDFLAGS := $(LDFLAGS) -mlittle-endian
+CDEFS := $(CDEFS) -DSCIF_NO=$(SCIF_NO) -D$(SYSTIMER_TYPE) -DBASE_ADDR=$(BASE_ADDR)
+
+ifeq ($(SAFEG),SECURE)
+CDEFS := $(CDEFS) -DTOPPERS_SAFEG_SECURE
+endif
+
+ifeq ($(SAFEG),NONSECURE)
+CDEFS := $(CDEFS) -DTOPPERS_SAFEG_NONSECURE
+endif
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIR := $(KERNEL_DIR) $(TARGETDIR)
+KERNEL_COBJS := $(KERNEL_COBJS) marzen.o target_config.o
+
+#
+#  タイマーに関する定義
+#
+ifeq ($(SYSTIMER_TYPE),INT_TIMER)
+	KERNEL_COBJS := $(KERNEL_COBJS) chip_timer.o 
+else
+	KERNEL_COBJS := $(KERNEL_COBJS) tmu.o 
+endif
+
+
+
+#
+#  システムサービスに関する定義
+#
+SYSSVC_DIR := $(SYSSVC_DIR) $(TARGETDIR)
+SYSSVC_COBJS := $(SYSSVC_COBJS) target_serial.o sh_scif.o
+
+#
+#  トレースログ記録のサンプルコードに関する定義
+#
+ifeq ($(ENABLE_TRACE),true)
+      COPTS := $(COPTS) -DTOPPERS_ENABLE_TRACE
+      KERNEL_DIR := $(KERNEL_DIR) $(SRCDIR)/arch/logtrace
+      KERNEL_COBJS := $(KERNEL_COBJS) trace_config.o trace_dump.o
+endif
+
+#
+#  GNU開発環境のターゲットアーキテクチャの定義
+#
+GCC_TARGET = arm-none-eabi
+
+#
+#  各セグメントの開始アドレスの定義
+#
+TEXT_START_ADDRESS=$(BASE_ADDR)
+#DATA_START_ADDRESS=$(BASE_ADDR) + 0x02000000
+
+#
+#  リンカスクリプトの定義
+#
+LDSCRIPT = $(TARGETDIR)/marzen.ld
+
+#
+#  スタートアップモジュールに関する定義
+#
+#  ct11mpcore.ldに「STARTUP(start.o)」を記述したため，スタートアップモジュー
+#  ルの名前をHIDDEN_OBJSに定義する．また，LDFLAGSに-nostdlibを追加している．
+#
+HIDDEN_OBJS = start.o
+
+$(HIDDEN_OBJS): %.o: %.S
+	$(CC) -c $(CFLAGS) $(KERNEL_CFLAGS) $<
+
+$(HIDDEN_OBJS:.o=.d): %.d: %.S
+	@$(PERL) $(SRCDIR)/utils/makedep -C $(CC) \
+		-O "$(CFLAGS) $(KERNEL_CFLAGS)" $< >> Makefile.depend
+
+LDFLAGS := -nostdlib $(LDFLAGS)
+
+#
+#  依存関係の定義
+#
+kernel_cfg.timestamp: $(TARGETDIR)/target.tf
+$(OBJFILE): $(TARGETDIR)/target_check.tf
+
+#
+#  チップ依存部のインクルード
+#
+include $(SRCDIR)/arch/arm_gcc/mpcore/Makefile.chip

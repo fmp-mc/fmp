@@ -1,0 +1,7 @@
+E_PACKAGE fmp_nios2_dev_gcc
+VERSION %date
+
+INCLUDE ../../MANIFEST
+INCLUDE ../../arch/nios2_gcc/MANIFEST
+INCLUDE ../../cfg/MANIFEST
+../../cfg/cfg/cfg.exe

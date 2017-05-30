@@ -1,0 +1,14 @@
+# target_config.c
+target_mprc_initialize
+target_mmu_init
+target_initialize
+target_exit
+perf_timer_initialize
+perf_timer_get
+perf_timer_conv_tim
+
+# naviengine.c
+naviengine_uart_init
+naviengine_uart_putc
+
+INCLUDE "arm_gcc/mpcore/chip"

@@ -1,0 +1,35 @@
+NOT_CFG_INT_BIT,NOT_CFG_INT_BIT
+TA_POSEDGE,TA_POSEDGE
+TA_NEGEDGE,TA_NEGEDGE
+TA_BOTHEDGE,TA_BOTHEDGE
+TA_LOWLEVEL,TA_LOWLEVEL
+TA_HIGHLEVEL,TA_HIGHLEVEL
+TMIN_EXCNO,TMIN_EXCNO
+TMAX_EXCNO,TMAX_EXCNO
+TMIN_INHNO,TMIN_INHNO
+TMAX_INHNO,TMAX_INHNO
+TMIN_INTNO,TMIN_INTNO
+TMAX_INTNO,TMAX_INTNO
+TMIN_INTNO_IRQ,TMIN_INTNO_IRQ
+TMAX_INTNO_IRQ,TMAX_INTNO_IRQ
+sizeof_TCB,sizeof(TCB)
+offsetof_TCB_p_tinib,"offsetof(TCB,p_tinib)"
+offsetof_TCB_texptn,"offsetof(TCB,texptn)"
+offsetof_TCB_sp,"offsetof(TCB,tskctxb.sp)"
+offsetof_TCB_pc,"offsetof(TCB,tskctxb.pc)"
+offsetof_TINIB_TSKINICTXB_stksz,"offsetof(TINIB,tskinictxb.stksz)"
+offsetof_TINIB_TSKINICTXB_stk_bottom,"offsetof(TINIB,tskinictxb.stk_bottom)"
+offsetof_PCB_p_firstlock,#(TTYPE_KLOCK != G_KLOCK),,"offsetof(PCB,p_firstlock)"
+offsetof_PCB_p_secondlock,#(TTYPE_KLOCK != G_KLOCK),,"offsetof(PCB,p_secondlock)"
+offsetof_PCB_p_runtsk,"offsetof(PCB,p_runtsk)"
+offsetof_PCB_p_schedtsk,"offsetof(PCB,p_schedtsk)"
+offsetof_PCB_reqflg,"offsetof(PCB,reqflg)"
+offsetof_PCB_dspflg,"offsetof(PCB,dspflg)"
+offsetof_PCB_locspnid,"offsetof(PCB,locspnid)"
+offsetof_PCB_excnest_count,"offsetof(PCB,target_pcb.excnest_count)"
+offsetof_PCB_istkpt,"offsetof(PCB,target_pcb.istkpt)"
+offsetof_PCB_lock_flag,"offsetof(PCB,target_pcb.lock_flag)"
+offsetof_PCB_saved_iipm,"offsetof(PCB,target_pcb.saved_iipm)"
+offsetof_PCB_p_vector_table,"offsetof(PCB,target_pcb.p_vector_table)"
+offsetof_PCB_ipmflg,"offsetof(PCB,ipmflg)"
+offsetof_PCB_disdsp,"offsetof(PCB,disdsp)"

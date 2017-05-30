@@ -1,0 +1,53 @@
+This file contains any messages produced by compilers while
+running configure, to aid debugging if configure makes a mistake.
+
+configure:709: checking for a BSD compatible install
+configure:762: checking whether build environment is sane
+configure:819: checking whether make sets ${MAKE}
+configure:852: checking for Cygwin environment
+configure:868: /opt/tilera/TileraMDE-4.3.4.193953/tilegx/bin/tile-gcc -c -mnewlib -g -ffunction-sections -fno-strict-aliasing -std=gnu99 -Wall -Werror -Wno-uninitialized -Wno-parentheses -I/opt/tilera/TileraMDE-4.3.4.193953/tilegx/lib/gcc/bin/../lib/gcc/tilegx-redhat-linux/4.4.7/include  conftest.c 1>&5
+configure: In function 'main':
+configure:864: error: '__CYGWIN32__' undeclared (first use in this function)
+configure:864: error: (Each undeclared identifier is reported only once
+configure:864: error: for each function it appears in.)
+configure: failed program was:
+#line 857 "configure"
+#include "confdefs.h"
+
+int main() {
+
+#ifndef __CYGWIN__
+#define __CYGWIN__ __CYGWIN32__
+#endif
+return __CYGWIN__;
+; return 0; }
+configure:885: checking for mingw32 environment
+configure:897: /opt/tilera/TileraMDE-4.3.4.193953/tilegx/bin/tile-gcc -c -mnewlib -g -ffunction-sections -fno-strict-aliasing -std=gnu99 -Wall -Werror -Wno-uninitialized -Wno-parentheses -I/opt/tilera/TileraMDE-4.3.4.193953/tilegx/lib/gcc/bin/../lib/gcc/tilegx-redhat-linux/4.4.7/include  conftest.c 1>&5
+configure: In function 'main':
+configure:893: error: '__MINGW32__' undeclared (first use in this function)
+configure:893: error: (Each undeclared identifier is reported only once
+configure:893: error: for each function it appears in.)
+configure: failed program was:
+#line 890 "configure"
+#include "confdefs.h"
+
+int main() {
+return __MINGW32__;
+; return 0; }
+configure:1067: checking host system type
+configure:1088: checking target system type
+configure:1106: checking build system type
+configure:1149: checking for working aclocal-1.4
+configure:1162: checking for working autoconf
+configure:1175: checking for working automake-1.4
+configure:1188: checking for working autoheader
+configure:1201: checking for working makeinfo
+configure:1226: checking for gcc
+configure:1305: checking whether we are using GNU C
+configure:1314: /opt/tilera/TileraMDE-4.3.4.193953/tilegx/bin/tile-gcc -E conftest.c
+configure:1329: checking whether /opt/tilera/TileraMDE-4.3.4.193953/tilegx/bin/tile-gcc accepts -g
+configure:1360: checking for as
+configure:1392: checking for ar
+configure:1424: checking for ranlib
+configure:1501: checking for a BSD compatible install
+configure:1555: checking whether to enable maintainer-specific portions of Makefiles

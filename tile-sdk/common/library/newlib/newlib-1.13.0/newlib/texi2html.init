@@ -1,0 +1,3 @@
+sub dummy { return ""; }
+$T2H_about_body = \&dummy;
+$T2H_print_page_foot = \&dummy;

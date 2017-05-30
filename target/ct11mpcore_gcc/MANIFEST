@@ -1,0 +1,37 @@
+PACKAGE fmp_arch_arm_gcc
+
+MANIFEST
+Makefile.target
+ct11mpcore.c
+ct11mpcore.h
+ct11mpcore.ld
+ct11mpcore_semihosting.ld
+E_PACKAGE
+makeoffset.c
+start.S
+target.tf
+target_asm.inc
+target_cfg1_out.h
+target_check.tf
+target_config.c
+target_config.h
+target_ipi.cfg
+target_ipi.h
+target_kernel.h
+target_pcb.h
+target_rename.def
+target_rename.h
+target_serial.c
+target_serial.cfg
+target_serial.h
+target_sil.h
+target_stddef.h
+target_syssvc.h
+target_test.h
+target_timer.cfg
+target_timer.h
+target_unrename.h
+target_user.txt
+qemu-0.14.0-patch_for_fmp.diff
+
+INCLUDE ../../pdic/arm_primecell_uart/MANIFEST

@@ -1,0 +1,7 @@
+INCLUDE "sh2a_dual_gcc/prc"
+
+# target_config.c
+target_bsc_pfc_initialize
+target_mprc_initialize
+target_initialize
+target_exit

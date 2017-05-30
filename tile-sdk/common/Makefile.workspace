@@ -1,0 +1,139 @@
+#
+# Makefile for a workspace of EV3 Platform.
+#
+
+#
+# Include configurations of EV3RT SDK
+#
+include ../Makefile.sdk.conf
+
+# Configuration
+SRCLANG := c
+KERNEL := fmp
+
+#
+# Functions
+#
+get_relpath = $(shell perl -MFile::Spec -e "print File::Spec->abs2rel(q($1),q($2))")
+
+#
+# Paths
+#
+KERNELDIR    := $(PWD)/../$(EV3RT_BASE_DIR)
+OBJDIR       := $(PWD)/../$(EV3RT_PRJ_OBJ_DIR)
+LIBKERNELDIR := $(PWD)/../$(EV3RT_LIBKERNEL_DIR)
+TARGETDIR    := $(KERNELDIR)/target/tilencore_gx36_gcc
+PASS0DIR     := $(PWD)/../common/pass0
+
+# Object files
+OBJFILENAME := $(KERNEL)
+ifneq (, $(findstring CYGWIN, $(shell uname)))
+    OBJFILENAME := $(OBJFILENAME).exe
+endif
+OBJBINARY := $(OBJDIR)/$(KERNEL).bin
+
+#
+# Determine Makefile for application
+# OUTPUT:
+# $(APPLDIR):         Absolute path of application folder
+# $(MKFILENAME):      File name of Makefile
+# $(MKFILE_DIR):      Absolute path of the folder holding Makefile
+#
+ifdef img
+APPLDIR := $(PWD)/$(img)
+MKFILENAME := Makefile.img
+endif
+ifdef app
+APPLDIR := $(PWD)/$(app)
+MKFILENAME := Makefile.app
+endif
+MKFILE_DIR := $(APPLDIR)
+ifeq (,$(wildcard $(mkfile_dir)/$(MKFILENAME)))
+MKFILE_DIR := $(PWD)/../common
+endif
+
+
+
+# Target for an application (static)
+#
+ifdef img
+
+include $(APPLDIR)/Makefile.inc
+
+#ifeq (,$(wildcard $(LIBKERNELDIR)/libkernel.a))
+# Build libkernel.a if not exist
+#img: $(APPLDIR) pass0 $(LIBKERNELDIR)/libkernel.a prepare-obj-folder
+#else
+#img: $(APPLDIR) pass0 prepare-obj-folder
+#endif
+img: realclean $(APPLDIR) pass0 $(LIBKERNELDIR)/libkernel.a prepare-obj-folder # Always do realclean for debug
+	cd $(OBJDIR) && \
+	make offset.h && make kernel_cfg.h && \
+	make -j8 > /dev/null 
+	@cp $(OBJDIR)/$(OBJFILENAME) $(PWD)
+
+$(LIBKERNELDIR)/libkernel.a: prepare-obj-folder
+	@cd $(OBJDIR) && \
+	make clean && \
+	make libkernel.a > /dev/null && \
+	cp libkernel.a $(LIBKERNELDIR)/libkernel.a
+
+endif
+
+#
+# Target for an application module (dynamic)
+#
+ifdef app
+
+include $(APPLDIR)/Makefile.inc
+
+app: $(APPLDIR) prepare-obj-folder
+	@cd $(OBJDIR) && \
+	make module_cfg.h && \
+	make -j8 && \
+	cp app $(PWD)/app # && cp app $(PWD)/app-$(subst /,,$(app))
+
+endif
+
+usage:
+	@echo make pass0
+	@echo make img="<folder>"
+	@echo make app="<folder>"
+
+pass0:
+	cd .. && \
+	cog.py -er -I $(PASS0DIR) @$(PASS0DIR)/cogfiles.txt
+
+clean:
+	rm -rf $(OBJDIR)
+
+realclean: clean
+	rm -rf $(notdir $(OBJFILENAME)) uImage app $(LIBKERNELDIR)/libkernel.a
+
+#
+# Phony target for preparing $(OBJDIR) folder
+#
+temp_mkfilename := .ev3rt_temp_Makefile
+ifdef app
+configure_copts := -DBUILD_MODULE
+endif
+prepare-obj-folder: clean
+	@cp $(MKFILE_DIR)/$(MKFILENAME) $(APPLDIR)/$(temp_mkfilename)
+	@mkdir -p $(OBJDIR)
+	cd $(OBJDIR) && \
+	$(KERNELDIR)/configure -T tilencore_gx36_gcc -A app \
+		-a $(call get_relpath,$(APPLDIR),$(OBJDIR)) \
+		-t $(call get_relpath,$(APPLDIR),$(OBJDIR)) \
+		-D $(call get_relpath,$(KERNELDIR),$(OBJDIR)) \
+		-L $(call get_relpath,$(LIBKERNELDIR),$(OBJDIR)) \
+		-l $(SRCLANG) \
+		-r \
+		-m $(temp_mkfilename) -o "$(configure_copts)" \
+		-U "$(APPLOBJS)" && \
+	rm $(APPLDIR)/$(temp_mkfilename) && \
+	mv $(temp_mkfilename) Makefile && \
+	make clean
+
+
+.PHONY: pass0 clean realclean prepare-obj-folder img app
+

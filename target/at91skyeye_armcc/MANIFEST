@@ -1,0 +1,13 @@
+PACKAGE fmp_arch_arm_gcc
+
+at91skyeye.scat
+E_PACKAGE
+Makefile.target
+MANIFEST
+target.tf
+target_asm.inc
+target_check.tf
+target_support.sx
+target_syssvc.h
+target_test.h
+target_user.txt

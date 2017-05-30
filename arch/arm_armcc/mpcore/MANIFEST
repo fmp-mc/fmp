@@ -1,0 +1,10 @@
+PACKAGE fmp_arch_arm_armcc
+
+chip_asm.inc
+chip_config_tool.h
+chip_sil.h
+chip_support.sx
+Makefile.chip
+MANIFEST
+mpcore_tool.h
+start.sx

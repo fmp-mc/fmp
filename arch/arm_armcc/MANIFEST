@@ -1,0 +1,15 @@
+PACKAGE asp_arch_arm_armcc
+VERSION 1.2.1
+
+MANIFEST
+README.txt
+
+common/core_asm.inc
+common/core_cfg1_out.h
+common/core_insn.h
+common/core_sil.h
+common/core_support.sx
+common/Makefile.core
+common/start.sx
+
+INCLUDE ../armcc/MANIFEST

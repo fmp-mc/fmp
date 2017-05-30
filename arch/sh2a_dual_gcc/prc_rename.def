@@ -1,0 +1,52 @@
+# start.S
+start
+
+# prc_support.S
+dispatch
+start_dispatch
+exit_and_dispatch
+call_exit_kernel
+start_r
+interrupt_entry
+exception_entry
+default_int_handler_entry
+default_exc_handler_entry
+
+iipm_disall
+
+# prc_config.c
+prc_initialize
+prc_exit
+x_config_int
+default_int_handler
+default_exc_handler
+
+ipr_info_tbl
+
+# sh2a_dual_config.c
+prc_mprc_initialize
+x_config_int
+
+irc_reg_tbl
+idcnt_tbl_h
+semr_tbl_b
+
+# kernel_cfg.c
+p_pcb_table
+p_vectors_table
+int_iipm_tbl
+
+# trace_config.c
+trace_sta_log
+trace_wri_log
+trace_rea_log
+trace_write_0
+trace_write_1
+trace_write_2
+trace_write_3
+
+trace_buffer
+trace_count
+trace_head
+trace_tail
+trace_lost

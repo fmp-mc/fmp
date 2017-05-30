@@ -1,0 +1,143 @@
+#
+#  @(#) $Id: Makefile.target 801 2011-05-03 13:54:23Z ertl-honda $
+# 
+
+#
+#		Makefile のターゲット依存部（AT91SKYEYE_ARMCC用）
+#
+
+#
+#  ボード名，プロセッサ名，開発環境名の定義
+#
+BOARD = at91skyeye
+PRC   = arm
+TOOL  = armcc
+
+#
+#  GCC用のファイルのディレクトリ
+#
+TARGETDIR_GCC := $(SRCDIR)/target/at91skyeye_gcc
+
+#
+# コンパイラ，アセンブラ，リンカ共通オプション
+# プロセッサ指定, リトルエンディアン指定
+#
+TARGET_COMMON_OPTS := --cpu=arm7tdmi --littleend
+
+#
+#  コンパイルオプション
+#
+COPTS := $(COPTS) $(TARGET_COMMON_OPTS)
+LDFLAGS := $(LDFLAGS) $(TARGET_COMMON_OPTS)
+INCLUDES := $(INCLUDES) -I$(TARGETDIR) -I$(SRCDIR)/arch/$(TOOL)
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIR := $(KERNEL_DIR) $(TARGETDIR)
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS) target_support.o
+KERNEL_COBJS := $(KERNEL_COBJS) target_config.o target_timer.o
+
+#
+#  システムサービスに関する定義
+#
+SYSSVC_DIR := $(SYSSVC_DIR)
+SYSSVC_COBJS := $(SYSSVC_COBJS) target_serial.o
+
+#
+#  コンフィギュレータ関係の変数の定義
+#
+CFG_TABS := $(CFG_TABS) --cfg1-def-table $(TARGETDIR_GCC)/target_def.csv
+
+#
+#  カーネルコンフィギュレーションの設定
+#
+
+#
+#  マスタプロセッサ
+#
+ifdef MASTER_PRCID
+  CDEFS := $(CDEFS) -DTOPPERS_MASTER_PRCID=$(MASTER_PRCID)
+endif
+
+#
+#  グローバルタイマ方式時のシステム時刻管理プロセッサ
+#
+ifdef SYSTIM_PRCID
+  CDEFS := $(CDEFS) -DTOPPERS_SYSTIM_PRCID=$(SYSTIM_PRCID)
+endif
+
+#
+#  タイマ方式
+#
+ifdef TIMER_TYPE
+  CDEFS := $(CDEFS) -D$(TIMER_TYPE)
+endif
+
+#
+#  ロック方式
+#
+ifdef LOCK_TYPE
+  CDEFS := $(CDEFS) -DTTYPE_KLOCK=$(LOCK_TYPE)
+endif
+
+#
+#  スピンロック方式
+#
+ifdef SPN_TYPE
+  CDEFS := $(CDEFS) -DTTYPE_SPN=$(SPN_TYPE)
+endif
+
+#
+#  トレースログに関する設定
+#
+ifeq ($(ENABLE_TRACE),true)
+      COPTS := $(COPTS)
+      CDEFS := $(CDEFS) -DTOPPERS_ENABLE_TRACE
+      KERNEL_DIR := $(KERNEL_DIR) $(SRCDIR)/arch/logtrace
+      KERNEL_COBJS := $(KERNEL_COBJS) trace_config.o trace_dump.o
+endif
+
+#
+#  リンカスクリプト(スキャッターファイル)の定義
+#
+SCATTER = $(TARGETDIR)/at91skyeye.scat
+LDFLAGS := $(LDFLAGS) --scatter=$(SCATTER)
+
+#
+#  スタートアップモジュールに関する定義
+#
+START_OBJS = start.o
+
+$(START_OBJS): %.o: %.sx
+	$(CC) -c $(CFLAGS) $(KERNEL_CFLAGS) $<
+
+$(START_OBJS:.o=.d): %.d: %.sx
+	@$(PERL) $(SRCDIR)/utils/makedep -C $(CC) $(MAKEDEP_OPTS) \
+		-O "$(CFLAGS) $(KERNEL_CFLAGS)" $< >> Makefile.depend
+
+LDFLAGS := $(LDFLAGS) --entry=_kernel_start
+
+#
+#  依存関係の定義
+#
+cfg1_out.c: $(TARGETDIR_GCC)/target_def.csv
+kernel_cfg.timestamp: $(TARGETDIR)/target.tf
+$(OBJFILE): $(TARGETDIR_GCC)/target_check.tf
+
+# 
+#  オフセットファイル生成のための定義 
+# 
+OFFSET_TF := $(TARGETDIR_GCC)/target_offset.tf
+
+#
+#  プロセッサ依存部のインクルード
+#
+include $(SRCDIR)/arch/$(PRC)_$(TOOL)/common/Makefile.core
+
+#
+#  同じファイルがあった場合にARMCC依存部のファイルを使用するようにするに，
+#  GCC依存部のファイルを後で指定する．
+#
+INCLUDES := $(INCLUDES) -I$(TARGETDIR_GCC)
+KERNEL_DIR := $(KERNEL_DIR) $(TARGETDIR_GCC)

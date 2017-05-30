@@ -1,0 +1,124 @@
+=====================================================================
+                   CT11MPCOREターゲット依存部マニュアル
+                                  Last Modified: 2012 Jan 13 16:00:43
+=====================================================================
+
+○概要
+
+CT11MPCOREターゲット依存部は，ARM社のCore Tile for ARM11 MPCore + 
+Emulation Baseboard をサポートしている．また，QEMUもサポートしている．
+
+○動作環境
+
+●コンパイラ
+
+動作確認を行ったGCCは，CodeSourcery G++ Lite の以下のバージョンである
+
+  CodeSourcery G++ Lite : 2011.03-42
+
+●デバッグ環境
+
+デバッグ環境としては，ARM製のRealView ICE と 京都マイクロコンピュータ
+製のPartner-Jet によるデバッグの動作確認を行った．
+
+●実行環境
+
+ボード上のファームウェアによるハードウェアの初期化後のデバッガによる
+RAMへのロード及び実行のみをサポートしている．フラッシュメモリからの起
+動をサポートするためには，別途初期化処理の実装が必要である．
+
+●シミュレーション環境
+
+QEMUにパッチを当てることにより，CT11MPCOREターゲット依存部を動作させる
+ことが可能である．動作可能なコア数は4コアで，動作確認を行ったバージョ
+ンは以下の通りである．
+
+ qemu-0.14.0
+ 
+パッチは，以下のファイルである．
+ 
+ qemu-0.14.0-patch_for_fmp.diff 
+
+2コア,4コアでの実行コマンドは次の通りである．
+
+ 2コア
+ SDL_STDIO_REDIRECT=0 qemu-system-arm.exe -cpu arm11mpcore  -M realview-eb-mpcore -smp 2 -serial vc:80Cx24C -serial vc:80Cx24C -no-reboot -icount auto --kernel fmp.exe
+
+ 4コア
+ SDL_STDIO_REDIRECT=0 qemu-system-arm.exe -cpu arm11mpcore  -M realview-eb-mpcore -smp 4 -serial vc:80Cx24C -serial vc:80Cx24C -serial vc:80Cx24C -serial vc:80Cx24C -no-reboot -icount auto --kernel fmp.exe
+
+また，デバッグは-s -S オプションを付加して実行し，gdb により，ローカル
+ホストのポート1234に接続する．
+
+QEMU環境では，Semihostingを用いることが可能である．Semihostingを用いる
+ためには，Makefileで以下のマクロをtrueに定義すること．
+
+ ENABLE_SEMIHOSTING
+
+また，QEMU環境では，GCOVによるプロファイル取得もサポートしている．プロ
+ファイルを取得したい場合には，Makefileで以下のマクロをtrueに定義すること．
+
+ ENABLE_GCOV
+ 
+さらに，QEMUに -semihosting オプションを付けて実行することにより，カバ
+レッジを取得可能である．
+
+○プロセッサ数
+
+ディフォルトでは，2プロセッサをサポートしている．TNUM_PRCID マクロを
+Makefileで設定することにより1〜4の範囲で設定することが可能である．
+
+
+○カーネルのコンフィギュレーション
+
+●カーネルロック方式
+
+ジャイアントロック方式とプロセッサロック方式と細粒度ロック方式をサポー
+ト．
+
+●カーネルタイマ方式
+
+グローバルタイマ方式とローカルタイマ方式の両方をサポート．
+
+●スピンロック方式
+
+ネイティブ方式とエミュレーション方式の両方をサポート．ネイティブ方式の
+場合の最大数は256個である．
+
+
+○カーネルの使用リソース
+
+プロセッサ毎にカーネルは以下のリソースを使用する．
+
+  ・ARM Primcell Uart
+     4ポート使用する．
+
+
+○変更履歴
+2012/01/13
+・MPCORE依存部のARMCC対応に伴う変更．
+
+2011/07/13
+・G_SYSLOGをサポート．
+・SoC Desingerのサポートを削除．
+・QEMUのパッチをプロジェクトに追加．
+・ディフォルトのシリアルポートを4ポートに変更．
+・RAISE_CPU_EXCEPTION をsvcに変更．
+・TNUM_PORT/TNUM_SIOPがプロセッサ数と連動するように変更．
+
+2010/10/14
+・tfファイル内で定義されている TCL_ADMIN_PRC の定義を 
+  target_kernel.h で定義されている，TOPPERS_SYSTIM_PRCID の定義と連動
+  するように変更．
+・クラス(TCL_x_ONLY)を追加．
+  
+2010/09/13
+ QEMUのサポートを追加．
+ 
+2009/07/14
+ サンプルプログラム用の定義（CPUEXC1...） をターゲット依存部に異動．
+
+2009/02/04
+ マニュアルの整備．
+
+以上．

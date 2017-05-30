@@ -1,0 +1,69 @@
+#!/bin/sh -e
+
+# Configure the standard Tilera newlib in an empty build directory.
+#
+# Newlib is only supported for newlib proper on the TILE architecture;
+# the gloss library is not supported.  Accordingly, this script just
+# runs "configure" and "make" in the newlib subdirectory.
+
+if [ -n "$TILERA_ROOT" ]; then
+    CC="$TILERA_ROOT"/bin/tile-gcc
+    if [ ! -f "$TILERA_ROOT"/bin/tile-gcc ]; then
+	echo "TILERA_ROOT must point to a per-chip hierarchy of an MDE install tree." >&2
+	exit 1
+    fi
+    ARCH=`$TILERA_ROOT/bin/tile-gcc -dumpmachine | sed 's/-.*//'`
+else
+    CC=gcc
+    ARCH=`uname -m`
+    case "$ARCH" in
+	tile*) ;;
+	*) echo "TILERA_ROOT not set in environment." >&2; exit 1 ;;
+    esac
+fi
+
+# Verify the "source" directory. Note that newlib's configure doesn't
+# tolerate being invoked as a subdir, so just make it absolute.
+src=${0%/tile-prepare}
+case "$src" in
+/*) ;;
+*) src=$(pwd)/$src ;;
+esac
+config=newlib/libc/sys/tilepro/configure
+product=newlib
+if [ ! -f $src/$config ]; then
+    echo "$0 is not in a $product source directory." >&2
+    exit 1
+fi
+
+# Verify the "build" directory.
+build=`pwd`
+if [ -f $config ]; then
+    echo "$0 must not be run in the $product source directory." >&2
+    echo "Please create a new empty directory to build in, then run" >&2
+    echo "  $build/tile-prepare" >&2
+    echo "from within that directory." >&2
+    exit 1
+fi
+
+# Discover the architecture we are building.
+case "$ARCH" in
+tilegx*) target=tilegx-elf64 ;;
+tilepro) target=tilepro-elf ;;
+*) echo "$CC output not understood: $ARCH" 2>&1; exit 1 ;;
+esac
+
+# Add compiler include dir explicitly for #include_next in <limits.h>.
+INCDIR=`$CC -print-file-name=include`
+
+CC="$CC" CFLAGS="-mnewlib -g -ffunction-sections -fno-strict-aliasing -std=gnu99 -Wall -Werror -Wno-uninitialized -Wno-parentheses -I$INCDIR" \
+    $src/newlib/configure \
+    --disable-newlib-mb \
+    --enable-newlib-multithread \
+    --enable-newlib-io-long-long \
+    --enable-newlib-io-long-double \
+    --with-gnu-ld $target
+
+echo ""
+echo "To build $product, just run 'make' in this directory."
+echo "To build $product documentation, run 'make -j1 dvi' in this directory."

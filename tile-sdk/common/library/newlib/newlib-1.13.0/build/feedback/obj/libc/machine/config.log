@@ -1,0 +1,24 @@
+This file contains any messages produced by compilers while
+running configure, to aid debugging if configure makes a mistake.
+
+configure:590: checking for a BSD compatible install
+configure:643: checking whether build environment is sane
+configure:700: checking whether make sets ${MAKE}
+configure:733: checking for Cygwin environment
+configure:766: checking for mingw32 environment
+configure:948: checking host system type
+configure:969: checking target system type
+configure:987: checking build system type
+configure:1030: checking for working aclocal-1.4
+configure:1043: checking for working autoconf
+configure:1056: checking for working automake-1.4
+configure:1069: checking for working autoheader
+configure:1082: checking for working makeinfo
+configure:1107: checking for gcc
+configure:1186: checking whether we are using GNU C
+configure:1210: checking whether /opt/tilera/TileraMDE-4.3.4.193953/tilegx/bin/tile-gcc  -ffeedback-generate-linker accepts -g
+configure:1241: checking for as
+configure:1273: checking for ar
+configure:1305: checking for ranlib
+configure:1382: checking for a BSD compatible install
+configure:1436: checking whether to enable maintainer-specific portions of Makefiles

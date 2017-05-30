@@ -1,0 +1,76 @@
+#
+#  @(#) $Id: Makefile.chip 801 2011-05-03 13:54:23Z ertl-honda $
+# 
+
+#
+#		Makefile のチップ依存部（MPCORE_ARMCC用）
+#
+
+#
+#  チップ名，コア名，開発環境名の定義
+#
+CHIP = mpcore
+PRC  = arm
+TOOL = armcc
+
+CHIPDIR = $(SRCDIR)/arch/$(PRC)_$(TOOL)/$(CHIP)
+
+#
+#  GCC用のファイルのディレクトリ
+#
+CHIPDIR_GCC := $(SRCDIR)/arch/$(PRC)_gcc/$(CHIP)
+
+#
+# コンパイラ，アセンブラ，リンカ共通オプション
+# プロセッサ指定, リトルエンディアン指定
+#
+ifeq ($(MPCORE_TYPE),ARM11)
+CHIP_COMMON_OPTS := --cpu=MPCore
+endif
+ifeq ($(MPCORE_TYPE),CA9)
+CHIP_COMMON_OPTS := --cpu=Cortex-A9
+endif
+
+CHIP_COMMON_OPTS :=  $(CHIP_COMMON_OPTS) --littleend
+
+#
+#  コンパイルオプション
+#
+COPTS := $(COPTS) $(CHIP_COMMON_OPTS)
+LDFLAGS := $(LDFLAGS) $(CHIP_COMMON_OPTS)
+INCLUDES := $(INCLUDES) -I$(CHIPDIR)
+
+#
+#  カーネルに関する定義
+#
+KERNEL_DIR := $(KERNEL_DIR) $(CHIPDIR)
+KERNEL_ASMOBJS := $(KERNEL_ASMOBJS) chip_support.o
+KERNEL_COBJS := $(KERNEL_COBJS) chip_config.o chip_timer.o mpcore.o
+
+#
+#  依存関係の定義
+#
+kernel_cfg.timestamp: $(CHIPDIR_GCC)/chip.tf
+$(OBJFILE): $(CHIPDIR_GCC)/chip_check.tf
+
+# 
+#  コンフィギュレータ関係の変数の定義 
+# 
+CFG_TABS := $(CFG_TABS) --cfg1-def-table $(CHIPDIR_GCC)/chip_def.csv 
+
+# 
+#  オフセットファイル生成のための定義 
+# 
+OFFSET_TF = $(CHIPDIR_GCC)/chip_offset.tf 
+
+#
+#  ARM依存部のインクルード
+#
+include $(SRCDIR)/arch/$(PRC)_$(TOOL)/common/Makefile.core
+
+#
+#  同じファイルがあった場合にARMCC依存部の
+#  ファイルを使用するようにする
+#
+INCLUDES := $(INCLUDES) -I$(CHIPDIR_GCC)
+KERNEL_DIR := $(KERNEL_DIR) $(CHIPDIR_GCC)

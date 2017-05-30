@@ -1,0 +1,11 @@
+E_PACKAGE fmp_naviengine_armcc
+VERSION %date
+
+INCLUDE MANIFEST
+INCLUDE ../naviengine_gcc/MANIFEST
+INCLUDE ../../MANIFEST
+INCLUDE ../../arch/arm_gcc/mpcore/MANIFEST
+INCLUDE ../../arch/arm_armcc/MANIFEST
+INCLUDE ../../arch/arm_armcc/mpcore/MANIFEST
+INCLUDE ../../cfg/MANIFEST
+../../cfg/cfg/cfg.exe

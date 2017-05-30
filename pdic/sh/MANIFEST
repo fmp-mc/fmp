@@ -1,0 +1,5 @@
+MANIFEST
+VERSION 1.2.1
+sh_scif.c
+sh_scif.h
+pdic_user.txt

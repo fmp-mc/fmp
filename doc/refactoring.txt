@@ -1,0 +1,2360 @@
+
+		TOPPERS/FMPカーネル
+		リファクタリングメモ
+
+		対応バージョン: Release 1.0.1
+		最終更新: 2009年8月13日
+
+このドキュメントは，TOPPERS/FMPカーネルのリファクタリングメモである．
+作成中のものであり，網羅的ではない．
+==========================================================================
+
+==========================================================================
+        TOPPERS/FMPカーネル
+        Release 1.0.1 から 1.1.0 へのリファクタリング
+==========================================================================
+
+1. プロセッサIDとプロセッサ固有データ関連
+2. マイグレーション関連
+3. 割込み関連
+4. ロックマクロ（外部）関連
+5. ロックマクロ（内部）関連
+6. APIの例
+
+==========================================================================
+1. プロセッサIDとプロセッサ固有データ関連
+==========================================================================
+【概要】
+
+1.1 プロセッサIDの参照は最適化の対象としない．
+1.2 プロセッサ固有データにアクセスする my_xxx マクロの廃止．
+1.3 get_my_p_pcb()/get_mp_p_pcb(prcid)の導入
+1.4 get_my_p_pcb() のターゲット依存部による最適化
+1.5 ターゲット依存のプロセッサ固有データのPCBへの統合
+
+
+【詳細】
+
+--------------------------------------------------------------------------
+1.1 プロセッサIDの参照は最適化の対象としない．
+--------------------------------------------------------------------------
+
+マイグレーションを考慮すると，ロック取得前に参照した自タスクが割り付け
+られたプロセッサのプロセッサIDはロック取得後に再度参照する必要がある．
+そのため，プロセッサIDの参照は最適化の対象としない（volatile） ．
+
+--------------------------------------------------------------------------
+1.2 プロセッサ固有データにアクセスする my_xxx マクロの廃止．
+--------------------------------------------------------------------------
+
+プロセッサIDの参照は最適化の対象としないとすると，my_xxx というマクロ
+でプロセッサ固有のデータをアクセスしている箇所全てにおいてプロセッサID
+へのアクセスが生じてしまう．そこでmy_xxxマクロは廃止して，次に説明する 
+get_my_p_pcb() を導入する．
+
+--------------------------------------------------------------------------
+1.3 get_my_p_pcb()/get_mp_p_pcb(prcid) の導入
+--------------------------------------------------------------------------
+
+割り付けられているプロセッサのPCBを取得するインライン関数を 
+get_my_p_pcb() / get_mp_p_pcb(prcid) として用意して，取得したPCBへのポ
+インタをローカル変数 my_p_pcb へ保存して，この変数を経由してプロセッサ
+固有のデータへアクセスする．これらの関数内でのpcbの取得は，最適化の対
+象とならないようにする．
+
+get_my_p_pcb() は共通部で，x_prc_index() を用いてインライン関数として
+定義される．ただし，1.4で述べるように，ターゲット依存部での最適化を可
+能とする．
+
+--------------------------------------------------------------------------
+1.4 get_my_p_pcb() のターゲット依存部による最適化
+--------------------------------------------------------------------------
+
+共通部の get_my_p_pcb() はプロセッサINDEXからPCBのアドレスを求めるが，
+ターゲット依存の最適化として，PCBのアドレスを直接保持するレジスタ等を
+用意して，そのレジスタをアクセスする方法が考えられる．そこで，
+OMIT_GET_MY_PCB を定義すると，共通部の get_my_p_pcb() が無効となり，タ
+ーゲット依存で，get_my_p_pcb() の定義を可能とする．
+
+MPCore依存部の場合は，PCBのアドレスをCP15の Thread ID レジスタに設定す
+ることが考えられる．Nios II の場合は，cpuid レジスタに同様PCBのアドレ
+スを設定する方法が考えられる．
+
+●PCBへのアクセスコストの比較
+
+void
+test(void){
+	PCB *p_pcb = get_my_p_pcb();
+	p_pcb->kerflg = false;
+}
+
+ARM
+CPU IDレジスタの使用
+	mrc	15, 0, r3, cr0, cr0, {5}
+	ldr	r2, [pc, #16]	; 3c0 <test+0x1c>
+	and	r3, r3, #15	; 0xf
+	ldr	r0, [r2, r3, lsl #2]
+	mov	r1, #0	; 0x0
+	str	r1, [r0, #24]
+
+Thread ID レジスタにPCBの先頭アドレスが入っている．
+	mrc	15, 0, r2, cr13, cr0, {3}
+	mov	r3, #0	; 0x0
+	str	r3, [r2, #24]
+
+Nios II
+CPU IDレジスタにCPUIDが入っている．
+	rdctl	r2,cpuid
+	slli	r2,r2,2
+	movhi	r3,0
+	addi	r3,r3,0
+	add	r2,r2,r3
+	ldw	r4,0(r2)
+	stw	zero,24(r4)
+	ret
+
+CPUIDレジスタにPCBの先頭アドレスが入っている．
+	rdctl	r2,cpuid
+	stw	zero,24(r2)
+	ret
+
+--------------------------------------------------------------------------
+1.5 ターゲット依存のプロセッサ固有データのPCBへの統合
+--------------------------------------------------------------------------
+
+ターゲット依存でプロセッサ毎に持つデータを構造体 TPCB としてまとめ，
+PCB内のメンバーとする．ディスパッチャ内等では，PCBのデータとターゲット
+依存でプロセッサ毎に持つデータへのアクセスが同じタイミングで発生する可
+能性があるため，PCBのメンバーとして置いた方が，アクセスコストが低くな
+る可能性があるためである．
+
+typedef struct processor_control_block {
+	...
+	TPCB	target_pcb; /* ターゲットプロセッサコントロールブロック */
+	...
+}PCB;
+
+
+==========================================================================
+2. マイグレーション関連
+==========================================================================
+【概要】
+
+2.1 プロセッサ固有データへのアクセスとマイグレーション
+ ・原則割込みを禁止した状態でアクセスすること
+   ・チェックマクロ内では，プロセッサ固有データへアクセスしない．
+   ・割込み禁止・許可している箇所を注意する．
+
+2.2 システムコールでのCPUロック前のチェックマクロに関する修正
+ ・sense_context()/t_sense_lock()/x_sense_lock() の変更
+ ・sense_tskctx_unl()/sense_intctx_unl()の追加
+ ・CHECK_DISPATCH() の CHECK_TSKCTX_UNL() への変更．
+   ・変更したAPIではdspflgのチェックをCPUロック後に実施
+ ・CHECK_NONSELF() の定義と使用箇所を削除
+   ・変更したAPIでは自タスクで無いことのチェックをCPUロック後に実施
+ ・CHECK_LOCSPN() の定義と使用箇所を削除
+   ・変更したAPIではスピンロック取得状態のチェックをCPUロック後に実施
+ ・CHECK_DISPATCH() の 変更
+   ・dspflg のみをチェックするように変更．
+
+2.3 ロック取得時のマイグレーションチェックの整理
+ ・自タスクのタスクロックの取得（タスクコンテキスト）  CPUロック後に，
+   プロセッサ識別レジスタ等により，アクセスするべきPCB  の情報を取得し，
+   ロックするべきロックを取得すればマイグレーショ  ンのチェックは必要
+   ない．
+ ・任意タスク（自タスクも含む）のロックを取得（タスクコンテキスト）
+   ロック取得後，対象タスクがマイグレーションしているかチェックする必
+   要がある．
+ ・二段目のロックとしてタスクロックを取得する場合（タスクコンテキスト）
+   mig_tskを変更することで，
+ ・自プロセッサのタスクロックの取得（非タスクコンテキスト）
+   マイグレーションのチェックは必要ない．
+
+2.4 mig_tsk でのオブジェクトロックの取得
+
+
+【詳細】
+
+--------------------------------------------------------------------------
+2.1 プロセッサ固有データへのアクセスとマイグレーション
+--------------------------------------------------------------------------
+
+PCB等のプロセッサ固有のデータへアクセスする場合は，CPUID等のプロセッサ
+を識別するレジスタにアクセスしてから，その情報を基にアクセスするべきデ
+ータを決定する．割込みが許可された状態でこの方法でプロセッサ固有のデー
+タへアクセスすると，誤ったプロセッサの固有データへアクセスする問題が発
+生する可能性がある．具体的には，プロセッサを識別するレジスタにアクセス
+した直後に割込みが入り，その先でマイグレーションされた場合，マイグレー
+ション前に割り付けられていたプロセッサの固有データにアクセスする．
+
+この問題を回避するため，プロセッサ固有データへのアクセスする場合は，必
+ず割込みを禁止してマイグレーションを抑制して行うこと．
+
+--------------------------------------------------------------------------
+2.2 システムコールでのCPUロック前のチェックマクロに関する修正
+--------------------------------------------------------------------------
+
+システムコールの入り口でCPUロック解除状態で実行されるチェックマクロの
+記述が現状，マイグレーションに対応していない．
+
+具体的には以下の変数や関数がチェックマクロ中でCPUロック解除状態で呼び
+出されるため，アクセスや呼び出し時にマイグレーションが発生すると，マイ
+グレーション終了後，以前に割り付けられたプロセッサの状態を見てしまう可
+能性がある．
+
+共通部(PCB内の変数)
+  my_dspflg, my_p_runtsk, my_locspnid
+
+ターゲット依存部
+  sense_context(), t_sense_lock(), x_sense_lock()
+
+#define CHECK_TSKCTX() {									\
+	if (sense_context()) {									\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_INTCTX() {									\
+	if (!sense_context()) {									\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_TSKCTX_UNL() {								\
+	if (sense_context() || t_sense_lock()) {				\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_INTCTX_UNL() {								\
+	if (!sense_context() || i_sense_lock()) {				\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_DISPATCH() {									\
+	if (sense_context() || t_sense_lock() || !my_dspflg) {	\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_NONSELF(p_tcb) {								\
+	if ((p_tcb) == my_p_runtsk) {							\
+		ercd = E_ILUSE;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_LOCSPN() {									\
+	if (my_locspnid != 0) {									\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+
+ターゲット依存部の関数に関しては，それぞれの関数内で割込みを禁止して処
+理を行えばよいが，実行オーバヘッドを考慮して，コンテキスト判定とCPUロ
+ック状態の両方をチェックするターゲット依存の関数を用意する．この関数で
+は，マイグレーションを考慮して，必要なら，割込みを禁止して判定する．リ
+ターン時には割込みを元の状態とする．
+
+ ・sense_tskctx_unl() : タスクコンテキスト かつ CPUロック解除状態なら true
+ ・sense_intctx_unl() : 非タスクコンテキスト かつ CPUロック解除状態なら true
+
+その他のsense系の依存部の関数はマイグレーションを考慮して，必要なら割
+込みを禁止して判定する．
+
+共通部の変数のチェックは，CPUロック後にチェックするようにする．具体的
+には，コード中のCHECK_DISPATCH()は，CHECK_TSKCTX_UNL()とする．そして，
+dspflgのみをチェックする CHECK_DISPATCH() を用意しCPUロック状態とした
+後に呼び出す．
+
+#define CHECK_TSKCTX_UNL() {								\
+	if (!sense_tskctx_unl()) {								\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_INTCTX_UNL() {								\
+	if (!sense_intctx_unl()) {								\
+		ercd = E_CTX;										\
+		goto error_exit;									\
+	}														\
+}
+
+#define CHECK_DISPATCH(p_pcb) {								\
+	if (!(p_pcb->dspflg)) {									\
+		ercd = E_CTX;										\
+		t_unlock_cpu();										\
+		goto error_exit;									\
+	}														\
+}															\
+
+--------------------------------------------------------------------------
+2.3 ロック取得時のマイグレーションチェックの整理
+--------------------------------------------------------------------------
+
+●タスクコンテキストから自タスクのタスクロックの取得
+
+自タスクのタスクロックを取得する場合は，以下の条件を満たすことで，ロッ
+ク取得後のマイグレーションのチェックは必要なくなる．
+
+  CPUロック状態でプロセッサIDを取得して，PCBへアクセスし，ロックすべき
+  ロックを取得する．
+
+FMPカーネルのマイグレーションの制約により，同じプロセッサに割り付けら
+れているタスクのみマイグレーション可能である．そのため，CPUロック状態
+とした後には，マイグレーションされることはないため，上記の条件によりロ
+ック取得後の自タスクのマイグレーションのチェックは必要なくなる．
+
+いいかえると，CPUロック解除状態で取得したプロセッサIDはマイグレーショ
+ンにより無効となっている可能性がある．
+
+ただし，ロックマクロ（関数）の内部仕様を変更したことにより，依存部のロ
+ック取得関数（t_acquire_lock(LOCK *p_lock)）内で割込みを許可するため，
+自タスクのロックを取得する場合にも，自タスクのマイグレーションのチェッ
+クは必要となる．
+
+●タスクコンテキストから任意タスク（自タスクも含む）のロックを取得
+
+任意タスク（自タスクも含む）のロックを取得する場合は，ロック取得後，対
+象タスクがマイグレーションしているかチェックする必要がある．
+
+チェック方法は，ロック取得時に使用したPCBと，ロック取得後のTCBに登録さ
+れているPCBが同一により判断する．
+
+●タスクコンテキストから二段目のロックとしてタスクロックを取得する場合
+
+タスクロックを二段目のロックとして取得する場合，ロック取得後に，マイグ
+レーションが発生していないかチェックする必要がある．これは，mig_tskに
+おいて，オブジェクト待ちのタスクをマイグレーションする際に，オブジェク
+トロックは取得せず，タスクロックのみを取得してマイグレーションを実施す
+るためである．
+
+逆に，mig_tskでマイグレーション対象のタスクがオブジェクト待ちの場合，
+オブジェクトロックも取得するようにすれば，二段目のロック取得時にマイグ
+レーションのチェックが必要なくなる．しかしながら，mig_tskにデッドロッ
+ク回避ルーチンが入り，ter_tskと同様に処理の代行もできないため，上限時
+間が抑えられなくなる．
+
+他にマイグレーションを発生させるAPIとしては，mact_tsk / imact_tsk / 
+ext_tsk / ter_tsk があるが，mact_tsk/imact_tskは，待ち状態のタスクに対
+しては，キューイングビットをセットするだけであるので問題ない．ext_tsk
+は，実行状態でのみ呼び出されるため該当しない．ter_tskは，オブジェクト
+ロックとタスクロックを取得するため問題ない．
+
+●非タスクコンテキストから自プロセッサのタスクロックの取得
+
+割込みハンドラやタイムイベントハンドラは実行中にマイグレーションされる
+ことはないため，マイグレーションのチェックは必要ない．
+
+●非タスクコンテキストから任意タスクのタスクロックの取得
+
+任意タスクのロックを取得する場合は，ロック取得後，対象タスクがマイグレ
+ーションしているかチェックする必要がある．
+
+チェック方法は，ロック取得時に使用したPCBと，ロック取得後のTCBに登録さ
+れているPCBが同一により判断する．
+
+--------------------------------------------------------------------------
+2.4 mig_tsk でのオブジェクトロックの取得
+--------------------------------------------------------------------------
+
+ロックマクロでのマイグレーションのチェックは軽いと見積もられるため，
+mig_tsk でのオブジェクトロックの取得は行わない．
+
+
+==========================================================================
+3. 割込み関連
+==========================================================================
+【概要】
+
+3.1 割込み番号と割込みハンドラ番号
+  ・統合仕様書 1.1.0 に準拠
+
+【詳細】
+
+3.1 割込み番号と割込みハンドラ番号
+
+割込み番号に関しては，複数のプロセッサに接続された割込み要求ラインに対
+しては，割込み番号の上位ビットを0とし，1つのプロセッサのみに接続された
+割込み要求ラインに対しては，割込み番号の上位ビット(32bitの場合は上位
+16bit)に接続されたプロセッサのID番号を含める．
+
+割込みハンドラ番号に関しては，上位ビット(32bitの場合は上位16bit)に，そ
+の割込みハンドラを実行するプロセッサのID番号を含める．
+
+クラスとの関係としては，割込みサービスルーチン（割込み番号）に関しては，
+割込み番号で指定されたプロセッサが割付け可能プロセッサに含まれていれば
+よい．割込みハンドラ（割込みハンドラ番号）に関しては，初期割付けプロセ
+ッサが含まれているかチェックする．
+
+==========================================================================
+4. ロックマクロ（外部）関連
+==========================================================================
+【概要】
+
+4.1 Release 1.0.1のロックマクロの種類
+4.2 Release 1.0.1の各システムコールで呼び出しているロックマクロ
+4.3 RUNNABLEチェック
+4.4 ロックマクロ中でのPCBへのポインタの取得
+  ・ロックマクロの引数へPCBのポインタ変数へのポインタを渡し，ロックマ
+    クロ中でPCBを取得して設定する．
+4.5 ロックマクロの整理
+4.6 rot_rdq/dis_dsp/ena_dsp/call_texrtn で用いているロックマクロの変更
+4.7 ロックマクロの関数化
+4.8 整理後のロック関数
+
+
+【詳細】
+
+--------------------------------------------------------------------------
+4.1 Release 1.0.1のロックマクロ種類
+--------------------------------------------------------------------------
+
+●タスクコンテキストから自タスクのタスクロックの取得
+ T_ACQUIRE_TSK_LOCK(p_pcb)
+ T_ACQUIRE_TSK_LOCK_AND_CHECK_RUNNABLE()
+ T_ACQUIRE_NESTED_LOCK_AND_CHECK_RUNNABLE(p_wobjcb)
+
+●タスクコンテキストから任意タスク（自タスクも含む）のタスクロックの取得
+ T_ACQUIRE_TSK_LOCK_AND_CHECK_MIG(p_pcb)
+ T_ACQUIRE_NESTED_LOCK_AND_CHECK_MIG(p_pcb, p_wobjct)
+
+●タスクコンテキストから2個のタスクロックの取得
+ T_ACQUIRE_DUAL_TSK_LOCK_AND_CHECK_MIG(f_p_pcb, t_p_pcb)
+ T_ACQUIRE_NESTED_DUAL_LOCK_AND_CHECK_MIG(f_p_pcb, t_p_pcb, p_wobjcb)
+
+●非タスクコンテキストから自プロセッサのタスクロックの取得
+ I_ACQUIRE_TSK_LOCK(p_pcb)
+ I_ACQUIRE_NESTED_LOCK(p_pcb, p_wobjcb)
+
+●非タスクコンテキストから任意タスクのタスクロックの取得
+ I_ACQUIRE_TSK_LOCK_AND_CHECK_MIG(p_pcb)
+ I_ACQUIRE_NESTED_LOCK_AND_CHECK_MIG(p_pcb, p_wobjcb)
+
+●非タスクコンテキストから2個のタスクロックの取得
+ I_ACQUIRE_DUAL_TSK_LOCK_AND_CHECK_MIG(f_p_pcb, t_p_pcb)
+
+●オブジェクトロックの取得
+ T_ACQUIRE_OBJ_LOCK(p_wobjcb)
+ I_ACQUIRE_OBJ_LOCK(p_wobjcb)
+
+--------------------------------------------------------------------------
+4.2 Release 1.0.1の各システムコールで呼び出しているロックマクロ
+--------------------------------------------------------------------------
+api_lock.xls を参照のこと．
+
+--------------------------------------------------------------------------
+4.3 RUNNABLEチェック
+--------------------------------------------------------------------------
+
+CPUロック状態としてロックを取得する間に，他のプロセッサのタスクによっ
+て，自タスクがSUSPEND状態に変更される可能性があるため，ロック取得後に
+対象タスクの状態をチェックする必要がある．
+
+●タスクコンテキストから自タスクのタスクロックの取得
+
+自タスクのタスクロックを取得する場合は，割込みを禁止してから，ロックを
+取得するまでの間に他のプロセッサに割り付けられているタスクから，
+sus_tskが発行され，強制待ち状態となる可能性がある．その場合，API実行を
+行うと，不整合が発生するため（強制待ち状態から二重待ち状態になる等..），
+ロック取得後，自タスクの状態がRUNNABLEかチェックする必要がある．
+
+一方，自タスクのタスク状態に関連しないシステムコールに関しては，強制待
+ち状態で実行しても問題ない．
+
+●タスクコンテキストから任意タスク（自タスクも含む）のタスクロックの取得
+
+他タスクを対象とした場合は，強制待ち状態のタスクからシステムコールを発
+行することになるが，カーネル処理の不可分性の観点からは問題ない．
+
+そもそも，強制待ち状態からのシステムコールの発行を抑止するには，タスク
+が呼び出す全てのシステムコールにおいて，自タスクの割り付けられたプロセ
+ッサのタスクロックを取得するようにしなければならない．
+
+自タスクを対象とした場合も，問題はないと考えられるが，個別のAPIで確認
+する必要がある．
+
+ref_tsk()は，強制待ち状態が読み取れる可能性があるため，仕様書の
+ref_tsk()に説明を加える．
+
+どちらの場合でも，システムコール実行中に強制待ち状態になっても正しく動
+作するテストが必要である．
+
+         自タスクを対象可能           
+act_tsk        ○
+can_act        ○        
+ter_tsk
+chg_pri        ○        
+get_pri        ○        
+wup_tsk        ○        
+can_wup        ○        
+rel_wai        ○        
+sus_tsk        ○        
+rsm_tsk        ○        
+ras_tex        ○        
+ref_tex        ○        
+
+sta_cyc
+stp_cyc
+ref_cyc
+sta_alm
+stp_alm
+ref_alm
+
+rot_rdq
+
+dis_dsp
+ena_dsp
+
+ref_tsk        ○        
+call_tertn     ○        
+
+rel_wai        ○        
+snd_dtq
+psnd_dtq
+tsnd_dtq
+fsnd_dtq
+rcv_dtq
+prcv_dtq
+trcv_dtq
+set_flg*
+snd_mbx
+snd_pdq
+psnd_pdq
+ipsnd_pdq
+tsnd_pdq
+rcv_pdq
+prcv_pdq
+trcv_pdq
+sig_sem
+init_wait_queue*
+
+mact_tsk       ○        
+mig_tsk        ○        
+ter_tsk
+msta_cyc
+msta_alm
+
+
+--------------------------------------------------------------------------
+4.4 ロックマクロ中でのPCBへのポインタの取得
+--------------------------------------------------------------------------
+
+Relase 1.0.1のロックマクロの多くはPCBへのポインタを引数として渡してい
+る．タスクロックの場合は，このPCBへのポインタは対象とするタスクのTCB内
+のPCBへのポインタを引数として渡す．しかしながら，一段目のロック取得の
+場合は，マイグレーションが発生する可能性があるため，ロック取得後には異
+なるPCBへのポインタ対して操作する必要がある．このように，使用するPCBへ
+のポインタを取得するタイミングは，マイグレーションを考慮する必要がある．
+
+そのため，ロックマクロの引数には，TCBへのポインタを指定することとして，
+PCBへのポインタはロックマクロ内で取得し，APIではそのPCBへのポインタを
+用いることとする．そのため，ロックマクロの引数へは，PCBへのポインタ変
+数のポインタを渡すこととする．
+
+--------------------------------------------------------------------------
+4.5 ロックマクロの整理
+--------------------------------------------------------------------------
+●任意タスクのロックの取得
+
+T_ACQUIRE_TSK_LOCK()/I_ACQUIRE_TSK_LOCK() マクロは，ほぼ自タスクのロッ
+クを取得するために使われているが，mrot_rdq/imrot_rdq においてのみ，特
+定のプロセッサのタスクロックを取得するために用いられている．
+
+そのため，プロセッサIDを指定してタスクロックを取得する，
+T_ACQUIRE_TSK_LOCK_PRCID()/I_ACQUIRE_TSK_LOCK_PRCID()を用意して，
+mrot_rdq ではこのマクロを用いる．
+
+ T_ACQUIRE_TSK_LOCK_PRCID(prcid, pp_pcb)
+ I_ACQUIRE_TSK_LOCK_PRCID(prcid, pp_pcb)
+
+●自タスクを対象としたロックの取得
+
+自タスクを対象としたロックの取得は， 
+T_ACQUIRE_TSK_LOCK_AND_CHECK_RUNNABLE() によって行うのが一般である．該
+当しないものは，タスク状態を変更しないため，RUNNABLEチェックを必要とし
+ない以下のAPIである．これらのAPIは，T_ACQUIRE_TSK_LOCK() によりロック
+を取得している．これらのAPIでもRUNNABLEチェックを行っても支障はない．
+
+  get_inf/dis_tex/ena_tex/dispatch_call_texrtn/get_tim
+
+自タスクのロックを取得することを明確化するため，自プロセッサのプロセッ
+サロックを取得するマクロ（RUNNABLEチェックも実施）は用意する．
+
+ T_ACQUIRE_TSK_LOCK_SELF(pp_pcb)
+
+●非タスクコンテキストで割り付けられているプロセッサのロックの取得
+
+自タスクを対象としたロックの取得と同様に，特定のプロセッサ（imrot_rdq）
+のタスクロックを取得するマクロ（I_ACQUIRE_TSK_LOCK_PRCID()）と，割り付
+けられているプロセッサのタスクロックを取得するマクロに分ける．
+
+ I_ACQUIRE_TSK_LOCK_SELF(pp_pcb)
+
+●T/I_ACQUIRE_NESTED_LOCK()の削除
+
+現状使用している箇所がないため削除する．
+
+●任意のタスクロックの取得
+
+現状では，以下のマクロでロックを取得している．
+
+  T_ACQUIRE_TSK_LOCK_AND_CHECK_MIG(p_pcb)
+  T_ACQUIRE_NESTED_LOCK_AND_CHECK_MIG(p_pcb, p_wobjct)
+  I_ACQUIRE_TSK_LOCK_AND_CHECK_MIG(p_pcb)
+  I_ACQUIRE_NESTED_LOCK_AND_CHECK_MIG(p_pcb, p_wobjcb)
+
+これらのマクロは使用頻度が高く，自タスクを対象としたロックの取得は別の
+マクロを使うことにしたので，名称を変更する．
+
+また，引数にPCBへのポインタを渡さないことにしたので，TCBへのポインタを
+渡すように引数を変更する．アラームや周期ハンドラはそれぞれの管理ブロッ
+クを渡す必要があるため，それぞれ専用のロックマクロを用意する．
+
+  T_ACQUIRE_TSK_LOCK(p_tcb, pp_pcb)
+  T_ACQUIRE_TSK_LOCK_ALM(p_almcb, pp_pcb)
+  T_ACQUIRE_TSK_LOCK_CYC(p_cyccb, pp_pcb)
+  T_ACQUIRE_NESTED_LOCK(p_tcb, p_wobjct, pp_pcb)
+
+  I_ACQUIRE_TSK_LOCK(p_tcb, pp_pcb)
+  I_ACQUIRE_TSK_LOCK_ALM(p_almcb, pp_pcb)
+  I_ACQUIRE_NESTED_LOCK(p_tcb, p_wobjcb, pp_pcb)
+
+●複数ロックの取得
+
+引数にPCBへのポインタを指定しないように変更する．そのため，周期ハンド
+ラ，アラームハンドラ用のマクロを新規に作成する．
+
+  T_ACQUIRE_DUAL_TSK_LOCK(p_tcb, dstprcid, pp_srcpcb, pp_dstpcb)
+  T_ACQUIRE_NESTED_DUAL_LOCK(p_tcb, dstprcid, p_wobjcb, pp_srcpcb, pp_dstpcb)
+  T_ACQUIRE_DUAL_TSK_LOCK_ALM(p_almcb, dstprcid, pp_srcpcb, pp_dstpcb)
+  T_ACQUIRE_DUAL_TSK_LOCK_CYC(p_cyccb, dstprcid, pp_srcpcb, pp_dstpcb)
+
+  I_ACQUIRE_DUAL_TSK_LOCK(p_tcb, dstprcid, pp_srcpcb, pp_dstpcb)
+  I_ACQUIRE_DUAL_TSK_LOCK_ALM(p_almcb, dstprcid, pp_srcpcb, pp_dstpcb)
+
+●その他ロックマクロ
+
+  I_ACQUIRE_TSK_LOCK1(p_pcb) 
+   -> I_ACQUIRE_TSK_LOCK_SELF1(pp_pcb) 
+
+wait_tmout()で，デッドロック回避のため，タスクロックをいったん解放して
+取得し，その後，優先度の高い割込みを受け付けるために割込みを許可する際
+にロックを解放，再取得するために，異なるラベルに対してリトライをするた
+めに必要．
+
+  ACQUIRE_NESTED_TSK_LOCK_AND_CHECK_MIG(p_pcb) 
+   -> ACQUIRE_NESTED_TSK_LOCK_AND_CHECK_MIG(p_tcb, pp_pcb) 
+     -> ACQUIRE_NESTED_LOCK_WITHOUT_PREEMPTION(p_tcb, pp_pcb) 
+
+set_flg/iset_flg/ini_xxxでリトライができないために使用される
+
+--------------------------------------------------------------------------
+4.6 rot_rdq/dis_dsp/ena_dsp/call_texrtn で用いているロックマクロの変更
+--------------------------------------------------------------------------
+
+現状，T_ACQUIRE_TSK_LOCK_AND_CHECK_MIG(my_p_pcb) によりタスクロックを
+取得しているが，自タスクが割り付けられているプロセッサのロックを取得す
+るという意味では，T_ACQUIRE_TSK_LOCK_SELF()の方が適切と考えられるため，
+変更する．
+
+--------------------------------------------------------------------------
+4.7 ロックマクロの関数化
+--------------------------------------------------------------------------
+
+FMP 1.0.1 と ASP 1.4.0 のサイズをsampleプログラムで比較すると，以下の
+ように大きくtextが増加している．
+
+ASP
+   text    data     bss     dec     hex 
+  35811       0   49324   85135   14c8f 
+
+FMP（プロセッサロック）
+   text    data     bss     dec     hex 
+  91183       0  118268  209451   3322b 
+
+その理由としては，ロックマクロの記述が長いためと考えられる，そこで，ロ
+ックマクロは関数として，ジャイアントロックはインライン関数とし，プロセ
+ッサロックと細粒度ロックは通常の関数とする．
+
+関数はそれぞれ，ロックが取得できれば false をロックが取得出来ず，リト
+ライが必要な場合は，true を返す．
+
+--------------------------------------------------------------------------
+4.8 整理後のロック関数
+--------------------------------------------------------------------------
+
+○ロック取得関数
+
+PCB*を返すものは，ロックが取得できない場合はNULLをロックが取得できた場
+合はpcbへのポインタを返す．
+
+●特定プロセッサのタスクロックの取得（タスクコンテキスト）
+ PCB* t_acquire_tsk_lock_prcid(ID prcid)
+
+●自プロセッサのタスクロックの取得（タスクコンテキスト）
+ PCB* t_acquire_tsk_lock_self(void);
+ PCB* t_acquire_nested_tsk_lock_self(LOCK *p_objlock)
+
+●任意タスク（自タスクも含む）のタスクロックの取得（タスクコンテキスト）
+ PCB* t_acquire_tsk_lock(TCB *p_tcb)
+ PCB* t_acquire_nested_tsk_lock(TCB *p_tcb, LOCK *p_objlock)
+
+●任意タイムイベントハンドラのタスクロックの取得（タスクコンテキスト）
+ PCB* t_acquire_tsk_lock_cyc(ALMCB *p_cyccb)
+ PCB* t_acquire_tsk_lock_alm(CYCCB *p_almcb)
+
+●2個のタスクロックの取得
+ void t_acquire_dual_tsk_lock(TCB *p_tcb, ID dstprcid, 
+                                    PCB **pp_srcpcb, PCB **pp_dstpcb)
+ void t_acquire_dual_tsk_lock_alm(ALMCB *p_almcb, ID dstprcid, 
+                                    PCB **pp_srcpcb, PCB **pp_dstpcb)
+ void t_acquire_dual_tsk_lock_cyc(CYCCB *p_almcb, ID dstprcid, 
+                                    PCB **pp_srcpcb, PCB **pp_dstpcb)
+ bool_t t_acquire_nested_dual_tsk_lock(TCB *p_tcb, ID dstprcid, LOCK *p_objlock,
+                                    PCB **pp_srcpcb, PCB **pp_dstpcb)
+
+●特定プロセッサのタスクロックの取得（非タスクコンテキスト）
+ PCB* i_acquire_tsk_lock_prcid(ID prcid)
+
+●自プロセッサのタスクロックの取得（非タスクコンテキスト）
+ PCB* i_acquire_tsk_lock_self(void)
+
+●任意タスクのタスクロックの取得（非タスクコンテキスト）
+ PCB* i_acquire_tsk_lock(TCB *p_tcb)
+ PCB* i_acquire_nested_tsk_lock(TCB *p_tcb, LOCK *p_objlock)
+
+●任意タイムイベントハンドラのタスクロックの取得（非タスクコンテキスト）
+ PCB* i_acquire_tsk_lock_alm(ALMCB *p_almcb)
+
+●2個のタスクロックの取得（非タスクコンテキスト）
+ void i_acquire_dual_tsk_lock(TCB *p_tcb, ID dstprcid, 
+                                    PCB **pp_srcpcb, PCB **pp_dstpcb)
+ void i_acquire_dual_tsk_lock_alm(ALMCB *p_almcb, ID dstprcid, 
+                                    PCB **pp_srcpcb, PCB **pp_dstpcb)
+
+●プリエンプションしない自プロセッサのタスクロックの取得
+ PCB* acquire_tsk_lock_without_preemption_self(void)
+
+●プリエンプションしない2段目のタスクロックの取得
+ PCB* acquire_nested_tsk_lock_without_preemption(TCB *p_tcb)
+
+●オブジェクトロックの取得（タスクコンテキスト）
+ void t_acquire_obj_lock(LOCK *p_objlock)
+
+●オブジェクトロックの取得（非タスクコンテキスト）
+ void i_acquire_obj_lock(LOCK *p_objlock)
+
+
+○ロック解放関数
+
+●タスクロックの解放
+ void release_tsk_lock(PCB *p_pcb);
+
+●タスクロックの解放（2段目）
+ void release_nested_tsk_lock(PCB *p_pcb);
+
+●タスクロックの解放とディスパッチ
+ void release_tsk_lock_and_dispatch(PCB *p_pcb,  bool_t dspreq);
+
+●2個のタスクロックの解放
+ void release_dual_tsk_lock(PCB *p_srcpcb, PCB *p_dstpcb);
+
+●2個のタスクロックの解放とディスパッチ
+ void release_dual_tsk_lock_and_dispatch(PCB *p_srcpcb, PCB *p_dstpcb, bool_t dspreq);
+
+●オブジェクトロックの解放
+ void release_obj_lock(LOCK *p_objlock);
+
+●オブジェクトロックの解放とディスパッチ
+ void release_obj_lock_and_dispatch(LOCK *p_objlock, bool_t dspreq);
+
+
+==========================================================================
+5. ロックマクロ（内部）関連
+==========================================================================
+【概要】
+
+5.1 割込みの発生の有無がチェックできない前提
+5.2 キューイングロックのサポート
+5.3 テストの容易化
+5.4 整理後のターゲット依存のロック関連関数
+5.5 整理後のロック関数の実装
+
+【詳細】
+
+--------------------------------------------------------------------------
+5.1 割込みの発生の有無がチェックできない前提
+--------------------------------------------------------------------------
+
+ターゲット依存部の関数，t_acquire_obj_lock()/t_acquire_tsk_lock() の仕
+様は，次のようになっている．
+
+ロックを取得できればfalseを返す．ロックが取得出来なければ，割込みの発
+生の有無をチェックして，割込みが発生していれば，falseを返す．割込みが
+発生していなければ，ロックの取得を再度試みる．割込みの発生の有無がチェ
+ックできないターゲットについては，ロックの取得に成功するまでロックの取
+得を繰り返すか，それとも1回の試行の結果，ロックが取得できなければtrue
+を返すかのどちらかを選択すること．
+
+割込みの発生の有無がチェックできないプロセッサの場合，ロックの取得に成
+功するまでロックの取得を繰り返すと割込み応答性が悪くなり，1回の試行の
+結果，ロックが取得できなければtrueを返すと，一段目のロックも解放するこ
+とになるので，スループットが悪化する可能性がある．
+
+現状サポートしているターゲットで，低オーバヘッドの割込みの発生確認の有
+無は次のようになっている．
+
+  Nios II   : 可能
+  MPCore    : 不可能
+  SHX-3     : 不可能
+  SH2A-DUAL : 不可能
+
+Nios II に関しても，割込み処理モデルの実現方法によっては，有効な割込み
+の判断が低オーバヘッドで実現できなくなる可能性がある．
+
+割込みの発生の有無が判定出来ないプロセッサにおいて，割込み応答性とスル
+ープットを確保するためには次の方法が考えられる．
+
+まず，プロセッサ毎に取得したロックを記憶するグローバル変数（取得済みロ
+ック管理変数）を用意する．1段目のロック（オブジェクトロック）を取得す
+ると，取得済みロック管理変数に保存する．2段目のロック取得ルーチンでは，
+ロックの取得を試み，ロックが取得できればそのまま進む．ロックが取得でき
+なかった場合は，一旦割込みを許可する．割込みハンドラの先頭では，取得済
+みロック管理変数をチェックして，ロックを取得している場合は，ロックを解
+放して，割込みハンドラを実行する．2段目のロック取得ルーチンでは，割込
+みの禁止後，取得済みロック管理変数をチェックして，1段目のロックが解放
+されていなければ2段目のロックの再試行を行う．1段目のロックが解放されて
+いれば，trueをリターンする．
+
+--------------------------------------------------------------------------
+5.2 キューイングロックのサポート
+--------------------------------------------------------------------------
+
+キューイングロックをサポートするために，ロック取得の施行のループを，共
+通部のロック関数ではなく，ターゲット依存のロック関連関数で行うようにす
+る．
+
+--------------------------------------------------------------------------
+5.3 テストの容易化
+--------------------------------------------------------------------------
+
+テストの容易化のため，ターゲット依存のロック関連の関数の数は可能な限り
+少なくする方針とする．
+
+現状，タスクロックとオブジェクトロックは異なる型としているが，違う必要
+はなく，同一の型にすると，ロック関連関数の数を減らせるため，同一のLOCK
+型にする．
+
+--------------------------------------------------------------------------
+5.4 整理後のターゲット依存のロック関連関数
+--------------------------------------------------------------------------
+
+これまでの方針により，ターゲット依存のロックマクロは次のようにする．
+
+●タスクコンテキスト用
+
+void t_acquire_lock(LOCK *p_lock)
+  1段目のロック取得関数．p_lockで渡されたロックを取得する．
+  
+bool_t t_acquire_nested_lock(LOCK *p_lock)
+  2段目以上のロック取得関数．
+  p_lockで渡されたロックを取得する．ロックを取得できれば
+  falseを返す．ロックが取得出来ずに割込みが入った場合はtrueを返す．
+
+●非タスクコンテキスト用
+
+void i_acquire_lock(LOCK *p_lock)
+  1段目のロック取得関数．p_lockで渡されたロックを取得する．
+  
+bool_t i_acquire_nested_lock(LOCK *p_lock)
+  2段目以上のロック取得関数．
+  p_lockで渡されたロックを取得する．ロックを取得できれば
+  falseを返す．ロックが取得出来ずに割込みが入った場合はtrueを返す．
+
+●タスク/非タスクコンテキスト両用
+
+void x_release_lock(LOCK *p_lock)
+  p_lockで渡されたロックを解放する．
+
+●割込みを許可しないロック取得関数
+
+void x_acquire_lock_without_preemption(LOCK *p_lock)
+ ロック取得に失敗した場合も割込みを許可しない．
+ set_flg/iset_flg/ini_xxxでリトライができないために使用される 
+
+--------------------------------------------------------------------------
+5.5 整理後のロック関数の実装
+--------------------------------------------------------------------------
+○PCBの変更
+
+追加
+	LOCK *p_firstlock  = NULL;
+	LOCK *p_secondlock = NULL;
+
+
+○割込みエントリー処理
+
+CPUロック状態を解除する前に，p_firstlock/p_secondlockをチェックして，
+NULL でなければロックを解放して NULL とする．
+
+割込エントリー処理()
+{
+	....
+
+	p_pcb = get_my_p_pcb(); 
+	if (p_pcb->p_firstlock != NULL) {
+		x_release_lock(p_pcb->p_firstlock);
+		p_pcb->p_firstlock = NULL;
+		if (p_pcb->p_secondlock != NULL) {
+			x_release_lock(p_pcb->p_secondlock);
+			p_pcb->p_secondlock = NULL;
+		}
+	}
+
+	....
+}
+
+○ターゲット依存部の関数
+
+void
+t_acquire_lock(LOCK *p_lock)
+{
+	while (test_and_set(p_lock)) {
+		t_unlock_cpu();
+		t_lock_cpu();
+	}
+}
+
+bool_t
+t_acquire_nested_lock(LOCK *p_lock)
+{
+	PCB		*p_pcb;
+
+	while (test_and_set(p_lock)) {
+		t_unlock_cpu();
+		t_lock_cpu();
+		/* マイグレーションする可能性があるのでここで毎回取得 */
+		p_pcb = get_my_p_pcb(); 
+		if (p_pcb->p_firstlock == NULL) {
+			return(true);
+		}
+	}
+	return(false);
+}
+
+void
+i_acquire_lock(LOCK *p_lock)
+{
+	while (test_and_set(p_lock)) {
+		i_unlock_cpu();
+		i_lock_cpu();
+	}
+}
+
+bool_t
+i_acquire_nested_lock(LOCK *p_lock)
+{
+	PCB		*p_pcb;
+
+	while (test_and_set(p_lock)) {
+		i_unlock_cpu();
+		i_lock_cpu();
+		/* 
+		 * マイグレーションしないため，while前に実行してもよいが，
+		 * 1回でロックがとれた場合，効率が悪いので，ここで取得
+		 */
+		p_pcb = get_my_p_pcb();
+		if (p_pcb->p_firstlock == NULL) {
+			return(true);
+		}
+	}
+	return(false);
+}
+
+void
+x_release_lock(LOCK *p_lock)
+{
+	*p_lock = 0;
+}
+
+void 
+x_acquire_lock_without_preemption(LOCK *p_lock)
+{
+	while (test_and_set(p_lock));
+}
+
+
+○システムコール内での書き方
+
+	t_lock_cpu()/i_lock_cpu();
+  retry:
+    XXXXXXXXXXXX
+
+○ロック取得関数（プロセッサロック・細粒度ロック）
+
+/*
+ *		タスクコンテキスト用のタスクロック取得関数
+ */
+
+/*
+ *  特定プロセッサのタスクロックの取得（タスクコンテキスト）
+ */
+PCB*
+t_acquire_tsk_lock_prcid(ID prcid)
+{
+	PCB *p_pcb;
+
+	p_pcb = get_mp_p_pcb(prcid);
+ 	t_acquire_lock(&(p_pcb->tsk_lock));
+	return(p_pcb);
+}
+
+/*
+ *  自プロセッサのタスクロックの取得（タスクコンテキスト/1段目）
+ *
+ *  t_acquire_lock()で割込みを許可するため，マイグレーションチェックも必要
+ *  となる．
+ * 
+ *  TSTAT_RUNNABLE()がfalseの場合に割込みを許可するのは，割込みを受け付ける
+ *  ことにより，ディスパッチを発生させるためである．割込みを許可しないと，
+ *  再びロックを1回で取得した場合，TSTAT_RUNNABLE()がfalseとなり，無
+ *  限にループする．
+ */
+PCB*
+t_acquire_tsk_lock_self(void)
+{
+	TCB *my_p_tcb;
+	PCB *my_p_pcb;
+
+	while(true) {
+		my_p_pcb = get_my_p_pcb();
+		my_p_tcb = my_p_pcb->p_runtsk;
+		t_acquire_lock(&(my_p_pcb->tsk_lock));
+		if (!TSTAT_RUNNABLE(my_p_tcb->tstat)) { 
+			/* RUNNABLEでない場合 */
+			x_release_lock(&(my_p_pcb->tsk_lock));
+			t_unlock_cpu();
+			t_lock_cpu();
+		} else if (my_p_pcb != my_p_tcb->p_pcb) {
+			/* 自タスクがマイグレートした場合 */
+			x_release_lock(&(my_p_pcb->tsk_lock));
+		} else {
+			return(my_p_pcb);
+		}
+	}
+}
+
+/*
+ *  自プロセッサのタスクロックの取得（タスクコンテキスト/2段目）
+ *  
+ *  TSTAT_RUNNABLE()がfalseの場合に割込みを許可するのは，割込みを受け付け
+ *  ることにより，ディスパッチを発生させるためである．割込みを許可しない
+ *  と，再びロックを1回で取得した場合，TSTAT_RUNNABLE()がfalseとなり，無
+ *  限にループする．
+ * 
+ *  t_acquire_nested_lock()内で割込みを許可した結果，割込みが入り，マイグレ
+ *  ーションが発生する可能性があるが，その場合は，t_acquire_nested_lock()が
+ *  trueで返る．そのため，ロック取得後のマイグレーションチェックの必要性
+ *  はない（マイグレーションしていればretryする）．
+ *
+ *  t_acquire_nested_lock()がfalseで返ってきた場合は，その前後で実行するプ
+ *  ロセッサが変わることがないため，p_pcbは前後で有効である．
+ */
+PCB*
+t_acquire_nested_tsk_lock_self(LOCK *p_objlock)
+{
+	PCB *my_p_pcb;
+
+	my_p_pcb = get_my_p_pcb();
+	my_p_pcb->p_firstlock = p_objlock;
+	if (t_acquire_nested_lock(&(my_p_pcb->tsk_lock))) {
+		return(NULL);
+	}
+	my_p_pcb->p_firstlock = NULL;
+	if (!TSTAT_RUNNABLE(my_p_pcb->p_runtsk->tstat)){
+		x_release_lock(&(my_p_pcb->tsk_lock));
+		x_release_lock(p_objlock);
+		t_unlock_cpu();
+		t_lock_cpu();
+		return(NULL);
+	}
+	return(my_p_pcb);
+}
+
+/*
+ *  任意タスク（自タスクも含む）のタスクロックの取得（タスクコンテキスト/1段目）
+ *
+ */
+PCB*
+t_acquire_tsk_lock(TCB *p_tcb)
+{
+	PCB *p_pcb;
+
+	while(true) {
+		p_pcb = p_tcb->p_pcb;
+		t_acquire_lock(&(p_pcb->tsk_lock));
+		if (p_pcb != p_tcb->p_pcb) {
+			/* 対象タスクがマイグレートした場合 */
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+/*
+ *  任意タスク（自タスクも含む）のタスクロックの取得（タスクコンテキスト/2段目）
+ * 
+ *  t_acquire_nested_lock()内で割込みを許可した結果，割込みが入り，自タ
+ *  スクがマイグレーションがする可能性があるが，その場合は，
+ *  t_acquire_nested_lock()がtrueで返る．
+ *
+ *  t_acquire_nested_lock()がfalseで返ってきた場合は，その前後で自タスク
+ *  を実行するプロセッサが変わることがないため，my_p_pcbは前後で有効である．
+ */
+PCB*
+t_acquire_nested_tsk_lock(TCB *p_tcb, LOCK *p_objlock)
+{
+	PCB *my_p_pcb;
+	PCB *p_pcb;
+ 
+	while(true) {
+		my_p_pcb = get_my_p_pcb();
+		my_p_pcb->p_firstlock = p_objlock;
+		p_pcb = p_tcb->p_pcb;
+		if (t_acquire_nested_lock(&(p_pcb->tsk_lock))) {
+			return(NULL);
+		}
+		my_p_pcb->p_firstlock = NULL;
+		if (p_pcb != p_tcb->p_pcb) {
+			/* 対象タスクがマイグレートした場合 */
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+/*
+ *  任意のアラームハンドラのタスクロックの取得（タスクコンテキスト/1段目）
+ */
+PCB*
+t_acquire_tsk_lock_alm(ALMCB *p_almcb)
+{
+	PCB *p_pcb;
+
+	while(true){
+		p_pcb = p_almcb->p_pcb;
+		t_acquire_lock(&(p_pcb->tsk_lock));
+		if (p_pcb != p_almcb->p_pcb) {
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+/*
+ *  任意の周期ハンドラのタスクロックの取得（タスクコンテキスト/1段目）
+ */
+PCB*
+t_acquire_tsk_lock_cyc(CYCCB *p_cyccb)
+{
+	PCB *p_pcb;
+
+	while(true){
+		p_pcb = p_cyccb->p_pcb;
+		t_acquire_lock(&(p_pcb->tsk_lock));
+		if (p_pcb != p_cyccb->p_pcb) {
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+
+/*
+ *  タスクの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ * 
+ *  t_acquire_nested_lock()内で割込みを許可した結果，割込みが入り，マイグレ
+ *  ーションが発生する可能性があるが，その場合は，t_acquire_nested_lock()が
+ *  trueで返る．
+ *
+ *  t_acquire_nested_lock()がfalseで返ってきた場合は，その前後で実行するプ
+ *  ロセッサが変わることがないため，my_p_pcbは前後で有効である．
+ */
+void 
+t_acquire_dual_tsk_lock(TCB *p_tcb, ID dstprcid, 
+						PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	PCB* my_p_pcb;
+
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+
+	while(true) {
+		*pp_srcpcb = p_tcb->p_pcb;
+		if ((*pp_srcpcb)->prcid > dstprcid) {
+			/* 1段目のロックを取得 */
+			t_acquire_lock(&((*pp_dstpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_dstpcb)->tsk_lock);
+			if (!t_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				/* 2段目のロックが取得できた場合 */
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_tcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		} else if ((*pp_srcpcb)->prcid < dstprcid) {
+			/* 1段目のロックを取得 */
+			t_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_srcpcb)->tsk_lock);
+			if (!t_acquire_nested_lock(&((*pp_dstpcb)->tsk_lock))) {
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_tcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		}
+		else {
+			t_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			if (*pp_srcpcb != p_tcb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+			} else {
+				return;
+			}
+		}
+	}
+}
+
+/*
+ *  アラームハンドラの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ */
+void
+t_acquire_dual_tsk_lock_alm(ALMCB *p_almcb, ID dstprcid, 
+							PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	PCB* my_p_pcb;
+
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+
+	while(true) {
+		*pp_srcpcb = p_almcb->p_pcb;
+		if ((*pp_srcpcb)->prcid > dstprcid) {
+			/* 1段目のロックを取得 */
+			t_acquire_lock(&((*pp_dstpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_dstpcb)->tsk_lock);
+			if (!t_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				/* 2段目のロックが取得できた場合 */
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_almcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		} else if ((*pp_srcpcb)->prcid < dstprcid) {
+			/* 1段目のロックを取得 */
+			t_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_srcpcb)->tsk_lock);
+			if (!t_acquire_nested_lock(&((*pp_dstpcb)->tsk_lock))) {
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_almcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		}
+		else {
+			t_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			if (*pp_srcpcb != p_almcb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+			} else {
+				return;
+			}
+		}
+	}
+}
+
+/*
+ *  周期ハンドラの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ */
+void
+t_acquire_dual_tsk_lock_cyc(CYCCB *p_cyccb, ID dstprcid, 
+							PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	PCB* my_p_pcb;
+
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+
+	while(true) {
+		*pp_srcpcb = p_cyccb->p_pcb;
+		if ((*pp_srcpcb)->prcid > dstprcid) {
+			/* 1段目のロックを取得 */
+			t_acquire_lock(&((*pp_dstpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_dstpcb)->tsk_lock);
+			if (!t_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				/* 2段目のロックが取得できた場合 */
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_cyccb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		} else if ((*pp_srcpcb)->prcid < dstprcid) {
+			/* 1段目のロックを取得 */
+			t_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_srcpcb)->tsk_lock);
+			if (!t_acquire_nested_lock(&((*pp_dstpcb)->tsk_lock))) {
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_cyccb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		}
+		else {
+			t_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			if (*pp_srcpcb != p_cyccb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+			} else {
+				return;
+			}
+		}
+	}
+}
+
+/*
+ *  タスクの2個のタスクロックの取得（タスクコンテキスト/2段目）
+ *
+ *  t_acquire_nested_lock()内で割込みを許可した結果，割込みが入り，マイグレ
+ *  ーションが発生する可能性があるが，その場合は，t_acquire_nested_lock()が
+ *  trueで返る．
+ *
+ *  t_acquire_nested_lock()がfalseで返ってきた場合は，その前後で実行するプ
+ *  ロセッサが変わることがないため，my_p_pcbは前後で有効である．
+ */
+bool_t 
+t_acquire_nested_dual_tsk_lock(TCB *p_tcb, ID dstprcid, LOCK *p_objlock,
+							   PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	PCB* my_p_pcb;
+
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+
+	while(true) {
+		*pp_srcpcb = p_tcb->p_pcb;
+		my_p_pcb = get_my_p_pcb();
+		my_p_pcb->p_firstlock = p_objlock;
+		if ((*pp_srcpcb)->prcid > dstprcid) {
+			/* 2段目のロックを取得 */
+			if (t_acquire_nested_lock(&((*pp_dstpcb)->tsk_lock))) {
+				return(true);
+			}
+			my_p_pcb->p_secondlock = &((*pp_dstpcb)->tsk_lock);
+			/* 3段目のロックを取得 */
+			if (t_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				return(true);
+			}
+			my_p_pcb->p_secondlock = NULL;
+			my_p_pcb->p_firstlock = NULL;
+			if (*pp_srcpcb != p_tcb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+				x_release_lock(&((*pp_dstpcb)->tsk_lock));
+			} else {
+				return(false);
+			}
+		} else if ((*pp_srcpcb)->prcid < dstprcid) {
+			/* 2段目のロックを取得 */
+			if (t_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				return(true);
+			}
+			my_p_pcb->p_secondlock = &((*pp_srcpcb)->tsk_lock);
+			/* 3段目のロックを取得 */
+			if (t_acquire_nested_lock(&((*pp_dstpcb)->tsk_lock))) {
+				return(true);
+			}
+			my_p_pcb->p_secondlock = NULL;
+			my_p_pcb->p_firstlock = NULL;
+			if (*pp_srcpcb != p_tcb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_dstpcb)->tsk_lock));
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+			}else {
+				return(false);
+			}
+		} else {
+			/* 2段目のロックを取得 */
+			if (t_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				return(true);
+			}
+			my_p_pcb->p_firstlock = NULL;
+			if (*pp_srcpcb != p_tcb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+			} else {
+				return(false);
+			}
+		}
+	}
+}
+
+/*
+ *		非タスクコンテキスト用のタスクロック取得関数
+ */
+
+/*
+ *  特定プロセッサのタスクロックの取得（非タスクコンテキスト）
+ */
+PCB*
+i_acquire_tsk_lock_prcid(ID prcid)
+{
+	PCB *p_pcb;
+
+	p_pcb = get_mp_p_pcb(prcid);
+	i_acquire_lock(&(p_pcb->tsk_lock));
+	return(get_mp_p_pcb(prcid));
+}
+
+/*
+ *  自プロセッサのタスクロックの取得（非タスクコンテキスト/1段目）
+ *
+ *  マイグレーションすることはないため，タスクコンテキストで実施していた
+ *  マイグレーションチェックは必要ない．  
+ */ 
+PCB*
+i_acquire_tsk_lock_self(void)
+{
+	PCB *my_p_pcb;
+
+	my_p_pcb = get_my_p_pcb();
+	i_acquire_lock(&(my_p_pcb->tsk_lock));
+	return(get_my_p_pcb());
+}
+
+
+/*
+ *  任意タスクのタスクロックの取得（非タスクコンテキスト/1段目）
+ *
+ */
+PCB*
+i_acquire_tsk_lock(TCB *p_tcb) 
+{
+	PCB *p_pcb;
+
+	while(true) {
+		p_pcb = p_tcb->p_pcb;
+		i_acquire_lock(&(p_pcb->tsk_lock));
+		if (p_pcb != p_tcb->p_pcb) {
+			/* 対象タスクがマイグレートした場合 */
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+/*
+ *  任意タスクのタスクロックの取得（非タスクコンテキスト/2段目）
+ */
+PCB*
+i_acquire_nested_tsk_lock(TCB *p_tcb, LOCK *p_objlock)
+{
+	PCB* my_p_pcb;
+	PCB* p_pcb;
+
+	while(true) {
+		my_p_pcb = get_my_p_pcb();
+		my_p_pcb->p_firstlock = p_objlock;
+		p_pcb = p_tcb->p_pcb;
+		if (i_acquire_nested_lock(&(p_pcb->tsk_lock))) {
+			return(NULL);
+		}
+		my_p_pcb->p_firstlock = NULL;
+		if (p_pcb != p_tcb->p_pcb) {
+			/* 対象タスクがマイグレートした場合 */
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+/*
+ *  任意のアラームハンドラのタスクロックの取得（非タスクコンテキスト）
+ */
+PCB*
+i_acquire_tsk_lock_alm(ALMCB *p_almcb)
+{
+	PCB *p_pcb;
+
+	while(true){
+		p_pcb = p_almcb->p_pcb;
+		i_acquire_lock(&(p_pcb->tsk_lock));
+		if (p_pcb != p_almcb->p_pcb) {
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+/*
+ *  2個のタスクロックの取得（非タスクコンテキスト/1段目）
+ */
+void 
+i_acquire_dual_tsk_lock(TCB *p_tcb, ID dstprcid, 
+                                    PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	PCB* my_p_pcb;
+
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+
+	while(true) {
+		*pp_srcpcb = p_tcb->p_pcb;
+		if ((*pp_srcpcb)->prcid > dstprcid) {
+			/* 1段目のロックを取得 */
+			i_acquire_lock(&((*pp_dstpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_dstpcb)->tsk_lock);
+			if (!i_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				/* 2段目のロックが取得できた場合 */
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_tcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		} else if ((*pp_srcpcb)->prcid < dstprcid) {
+			/* 1段目のロックを取得 */
+			i_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_srcpcb)->tsk_lock);
+			if (!i_acquire_nested_lock(&((*pp_dstpcb)->tsk_lock))) {
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_tcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		}
+		else {
+			i_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			if (*pp_srcpcb != p_tcb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+			} else {
+				return;
+			}
+		}
+	}
+}
+
+/*
+ *  アラームハンドラの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ */
+void
+i_acquire_dual_tsk_lock_alm(ALMCB *p_almcb, ID dstprcid, 
+							PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	PCB* my_p_pcb;
+
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+
+	while(true) {
+		*pp_srcpcb = p_almcb->p_pcb;
+		if ((*pp_srcpcb)->prcid > dstprcid) {
+			/* 1段目のロックを取得 */
+			i_acquire_lock(&((*pp_dstpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_dstpcb)->tsk_lock);
+			if (!i_acquire_nested_lock(&((*pp_srcpcb)->tsk_lock))) {
+				/* 2段目のロックが取得できた場合 */
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_almcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		} else if ((*pp_srcpcb)->prcid < dstprcid) {
+			/* 1段目のロックを取得 */
+			i_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			my_p_pcb = get_my_p_pcb();
+			my_p_pcb->p_firstlock = &((*pp_srcpcb)->tsk_lock);
+			if (!i_acquire_nested_lock(&((*pp_dstpcb)->tsk_lock))) {
+				my_p_pcb->p_firstlock = NULL;
+				if (*pp_srcpcb != p_almcb->p_pcb) {
+					/* 対象タスクがマイグレートした場合 */
+					x_release_lock(&((*pp_dstpcb)->tsk_lock));
+					x_release_lock(&((*pp_srcpcb)->tsk_lock));
+				} else {
+					return;
+				}
+			}
+		}
+		else {
+			i_acquire_lock(&((*pp_srcpcb)->tsk_lock));
+			if (*pp_srcpcb != p_almcb->p_pcb) {
+				/* 対象タスクがマイグレートした場合 */
+				x_release_lock(&((*pp_srcpcb)->tsk_lock));
+			} else {
+				return;
+			}
+		}
+	}
+}
+
+/*
+ *		タスクコンテキスト用のオブジェクトロック取得関数
+ */
+
+/*
+ *  オブジェクトロックの取得（タスクコンテキスト）
+ */
+void
+t_acquire_obj_lock(LOCK *p_objlock) 
+{ 
+	t_acquire_lock(p_objlock);
+}
+
+/*
+ *		非タスクコンテキスト用のオブジェクトロック取得関数
+ */
+
+/*
+ * オブジェクトロックの取得（非タスクコンテキスト）
+ */
+void 
+i_acquire_obj_lock(LOCK *p_objlock) 
+{ 
+	i_acquire_lock(p_objlock);
+}
+
+/*
+ *		タスクロック解放関数
+ */
+
+/*
+ *  タスクロックの解放（タスクコンテキスト）
+ */ 
+void
+release_tsk_lock(PCB *p_pcb)
+{
+	x_release_lock(&(p_pcb->tsk_lock));
+}
+
+/*
+ *  タスクロックの解放（2段目）
+ */ 
+void
+release_nested_tsk_lock(PCB *p_pcb)
+{
+	x_release_lock(&(p_pcb->tsk_lock));
+}
+
+/*
+ *  タスクロックの解放とディスパッチ
+ */
+void
+release_tsk_lock_and_dispatch(PCB *p_pcb,  bool_t dspreq)
+{
+	x_release_lock(&(p_pcb->tsk_lock));
+	if (dspreq) {
+		dispatch();
+	}
+}
+
+/*
+ *  2個のタスクロックの解放
+ */ 
+void
+release_dual_tsk_lock(PCB *p_srcpcb,  PCB *p_dstpcb)
+{
+	x_release_lock(&(p_srcpcb->tsk_lock));
+	x_release_lock(&(p_dstpcb->tsk_lock));
+}
+
+/*
+ *  2個のタスクロックの解放とディスパッチ
+ */
+void
+release_dual_tsk_lock_and_dispatch(PCB *p_srcpcb,  PCB *p_dstpcb, bool_t dspreq)
+{
+	x_release_lock(&(p_srcpcb->tsk_lock));
+	x_release_lock(&(p_dstpcb->tsk_lock));
+	if (dspreq) {
+		dispatch();
+	}
+}
+
+/*
+ *		オブジェクトロック解放関数
+ */
+
+/*
+ * オブジェクトロックの解放（非タスクコンテキスト）
+ */ 
+void
+release_obj_lock(LOCK *p_objlock)
+{
+	x_release_lock(p_objlock);
+}
+
+/*
+ * オブジェクトロックの解放とディスパッチ
+ */ 
+void
+release_obj_lock_and_dispatch(LOCK *p_objlock, bool_t dspreq)
+{
+	x_release_lock(p_objlock);
+	if (dspreq) {
+		dispatch();
+	}
+}
+
+/*
+ *		その他のロック関数
+ */
+
+/*
+ *  プリエンプションしない自タスクのタスクロックの取得
+ */
+PCB* 
+acquire_tsk_lock_without_preemption_self(void)
+{
+	PCB *my_p_pcb;
+
+	my_p_pcb = get_my_p_pcb();
+	x_acquire_lock_without_preemption(&(my_p_pcb->tsk_lock));
+
+	return(my_p_pcb);
+}
+
+/*
+ *  プリエンプションしないタスクロックの取得（2段目）
+ */
+PCB*
+acquire_nested_tsk_lock_without_preemption(TCB *p_tcb)
+{
+	PCB *p_pcb;
+
+	while(true) {
+		p_pcb = p_tcb->p_pcb;
+		x_acquire_lock_without_preemption(&(p_pcb->tsk_lock));
+		if (p_pcb != p_tcb->p_pcb) {
+			/* 対象タスクがマイグレートした場合 */
+			x_release_lock(&(p_pcb->tsk_lock));
+		} else {
+			return(p_pcb);
+		}
+	}
+}
+
+
+○ロック取得関数（ジャイアントロック）
+
+●ロック変数
+  LOCK giant_lock;
+
+/*
+ *  特定プロセッサのタスクロックの取得（タスクコンテキスト）
+ */
+Inline PCB*
+t_acquire_tsk_lock_prcid(ID prcid)
+{
+	t_acquire_lock(&giant_lock);
+	return(get_mp_p_pcb(prcid));
+}
+
+/*
+ *  自プロセッサのタスクロックの取得（タスクコンテキスト/1段目）
+ *
+ *  ロック取得後，自タスクのマイグレーションをチェックする方法もあるが，
+ *  チェックのコストを考えると，チェックせずに一律 p_pcb を取得した方が効
+ *  率がよいと判断した． 
+ */
+Inline PCB*
+t_acquire_tsk_lock_self(void)
+{
+	PCB *p_pcb;
+
+	while(true) {
+		p_pcb = get_my_p_pcb();
+		t_acquire_lock(&giant_lock);
+		if (!TSTAT_RUNNABLE(p_pcb->p_runtsk->tstat)) { 
+			/* RUNNABLEでない場合 */
+			x_release_lock(&giant_lock);
+			t_unlock_cpu();
+			t_lock_cpu();
+		} else {
+			/* 自タスクがマイグレートした場合を考慮してp_pcbを再取得 */
+			return(get_my_p_pcb());
+		}
+	}
+}
+
+/*
+ *  自プロセッサのタスクロックの取得（タスクコンテキスト/2段目）
+ */ 
+Inline PCB*
+t_acquire_nested_tsk_lock_self(LOCK *p_objlock)
+{
+	return(get_my_p_pcb());
+}
+
+/*
+ *  任意タスク（自タスクも含む）のタスクロックの取得（タスクコンテキスト/1段目）
+ * 
+ *  対象タスクがマイグレーションする可能性があるので，ロック取得後に，p_pcbを取得する．  
+ */ 
+Inline  PCB*
+t_acquire_tsk_lock(TCB *p_tcb)
+{
+	t_acquire_lock(&giant_lock);
+	return(p_tcb->p_pcb);
+}
+
+/*
+ *  任意タスク（自タスクも含む）のタスクロックの取得（タスクコンテキスト/2段目）
+ */
+Inline PCB*
+t_acquire_nested_tsk_lock(TCB *p_tcb, LOCK *p_objlock)
+{
+	return(p_tcb->p_pcb);
+}
+
+/*
+ *  任意のアラームハンドラのタスクロックの取得（タスクコンテキスト/1段目）
+ * 
+ *  対象アラームハンドラがマイグレーションする可能性があるので，ロック取得後に，
+ *  p_pcbを取得する．
+ */
+Inline PCB*
+t_acquire_tsk_lock_alm(ALMCB *p_almcb)
+{
+	t_acquire_lock(&giant_lock);
+	return(p_almcb->p_pcb);
+}
+
+/*
+ *  任意の周期ハンドラのタスクロックの取得（タスクコンテキスト/1段目）
+ *  
+ *  対象周期ハンドラがマイグレーションする可能性があるので，ロック取得後に，
+ *  p_pcbを取得する．  
+ */
+Inline PCB*
+t_acquire_tsk_lock_cyc(CYCCB *p_cyccb)
+{
+	t_acquire_lock(&giant_lock);
+	return(p_cyccb->p_pcb);
+}
+
+/*
+ *  タスクの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ * 
+ *  対象タスクがマイグレーションする可能性があるので，ロック取得後に，p_pcbを取得する．    
+ */  
+Inline void
+t_acquire_dual_tsk_lock(TCB *p_tcb, ID dstprcid, 
+						PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	t_acquire_lock(&giant_lock);
+	*pp_srcpcb = p_tcb->p_pcb;
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+}
+
+/*
+ *  アラームハンドラの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ * 
+ *  対象アラームハンドラがマイグレーションする可能性があるので，ロック取得後に，
+ *  p_pcbを取得する．  
+ */  
+Inline void
+t_acquire_dual_tsk_lock_alm(ALMCB *p_almcb, ID dstprcid, 
+							PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	t_acquire_lock(&giant_lock);
+	*pp_srcpcb = p_almcb->p_pcb;
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+}
+
+/*
+ *  周期ハンドラの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ *  
+ *  対象周期ハンドラがマイグレーションする可能性があるので，ロック取得後に，
+ *  p_pcbを取得する．    
+ */  
+Inline void
+t_acquire_dual_tsk_lock_cyc(CYCCB *p_cyccb, ID dstprcid, 
+							PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	t_acquire_lock(&giant_lock);
+	*pp_srcpcb = p_cyccb->p_pcb;
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+}
+
+/*
+ *  タスクの2個のタスクロックの取得（タスクコンテキスト/2段目）
+ */
+Inline bool_t
+t_acquire_nested_dual_tsk_lock(TCB *p_tcb, ID dstprcid, LOCK *p_objlock,
+							   PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	*pp_srcpcb = p_tcb->p_pcb;
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+	return(false);
+}
+
+/*
+ *		非タスクコンテキスト用のタスクロック取得関数
+ */
+
+/*
+ *  特定プロセッサのタスクロックの取得（非タスクコンテキスト）
+ */
+Inline PCB*
+i_acquire_tsk_lock_prcid(ID prcid)
+{
+	i_acquire_lock(&giant_lock);
+	return(get_mp_p_pcb(prcid));
+}
+
+/*
+ *  自プロセッサのタスクロックの取得（非タスクコンテキスト/1段目）
+ */ 
+Inline PCB*
+i_acquire_tsk_lock_self(void)
+{
+	i_acquire_lock(&giant_lock);
+	return(get_my_p_pcb());
+}
+
+/*
+ *  任意タスクのタスクロックの取得（非タスクコンテキスト/1段目）
+ *
+ *  対象タスクがマイグレーションする可能性があるので，ロック取得後に，
+ *  pp_pcbを取得する．
+ */
+Inline PCB*
+i_acquire_tsk_lock(TCB *p_tcb)
+{
+	i_acquire_lock(&giant_lock);
+	return(p_tcb->p_pcb);
+}
+
+/*
+ *  任意タスクのタスクロックの取得（非タスクコンテキスト/2段目）
+ */
+Inline PCB*
+i_acquire_nested_tsk_lock(TCB *p_tcb, LOCK *p_objlock)
+{
+	return(p_tcb->p_pcb);
+}
+
+/*
+ *  任意のアラームハンドラのタスクロックの取得（非タスクコンテキスト）
+ *
+ *  対象アラームハンドラがマイグレーションする可能性があるので，ロック取得後に，
+ *  pp_pcbを取得する．
+ */
+Inline PCB*
+i_acquire_tsk_lock_alm(ALMCB *p_almcb)
+{
+	i_acquire_lock(&giant_lock);
+	return(p_almcb->p_pcb);
+}
+
+/*
+ *  2個のタスクロックの取得（非タスクコンテキスト/1段目）
+ *
+ *  対象タスクがマイグレーションする可能性があるので，ロック取得後に，
+ *  pp_srcpcbを取得する．  
+ */  
+Inline void
+i_acquire_dual_tsk_lock(TCB *p_tcb, ID dstprcid, 
+						PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	i_acquire_lock(&giant_lock);
+	*pp_srcpcb = p_tcb->p_pcb;
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+}
+
+/*
+ *  アラームハンドラの2個のタスクロックの取得（タスクコンテキスト/1段目）
+ *
+ *  対象アラームハンドラがマイグレーションする可能性があるので，ロック取
+ *  得後に，pp_srcpcbを取得する．  
+ */  
+Inline void
+i_acquire_dual_tsk_lock_alm(ALMCB *p_almcb, ID dstprcid, 
+							PCB **pp_srcpcb, PCB **pp_dstpcb)
+{
+	i_acquire_lock(&giant_lock);
+	*pp_srcpcb = p_almcb->p_pcb;
+	*pp_dstpcb = get_mp_p_pcb(dstprcid);
+}
+
+/*
+ *		タスクコンテキスト用のオブジェクトロック取得関数
+ */
+
+/*
+ *  オブジェクトロックの取得（タスクコンテキスト）
+ */
+Inline void
+t_acquire_obj_lock(LOCK *p_objlock)
+{
+	t_acquire_lock(&giant_lock);
+}
+
+/*
+ *		非タスクコンテキスト用のオブジェクトロック取得関数
+ */
+
+/*
+ * オブジェクトロックの取得（非タスクコンテキスト）
+ */ 
+Inline void
+i_acquire_obj_lock(LOCK *p_objlock)
+{
+	t_acquire_lock(&giant_lock);
+}
+
+/*
+ *		タスクロック解放関数
+ */
+
+/*
+ *  タスクロックの解放（タスクコンテキスト）
+ */ 
+Inline void
+release_tsk_lock(PCB *p_pcb)
+{
+	x_release_lock(&giant_lock);
+}
+
+/*
+ *  タスクロックの解放（2段目）
+ */ 
+Inline void
+release_nested_tsk_lock(PCB *p_pcb)
+{
+	
+}
+
+/*
+ *  タスクロックの解放とディスパッチ
+ */
+Inline void
+release_tsk_lock_and_dispatch(PCB *p_pcb,  bool_t dspreq)
+{
+	x_release_lock(&giant_lock);
+	if (dspreq) {
+		dispatch();
+	}
+}
+
+/*
+ *  2個のタスクロックの解放
+ */ 
+Inline void
+release_dual_tsk_lock(PCB *p_srcpcb,  PCB *p_dstpcb)
+{
+	x_release_lock(&giant_lock);
+}
+
+/*
+ *  2個のタスクロックの解放とディスパッチ
+ */
+Inline void
+release_dual_tsk_lock_and_dispatch(PCB *p_srcpcb,  PCB *p_dstpcb, bool_t dspreq)
+{
+	x_release_lock(&giant_lock);
+	if (dspreq) {
+		dispatch();
+	}
+}
+
+/*
+ *		オブジェクトロック解放関数
+ */
+
+/*
+ * オブジェクトロックの解放（非タスクコンテキスト）
+ */ 
+Inline void
+release_obj_lock(LOCK *p_objlock)
+{
+	x_release_lock(&giant_lock);
+}
+
+/*
+ * オブジェクトロックの解放とディスパッチ
+ */ 
+Inline void
+release_obj_lock_and_dispatch(LOCK *p_objlock, bool_t dspreq)
+{
+	x_release_lock(&giant_lock);
+	if (dspreq) {
+		dispatch();
+	}
+}
+
+/*
+ *		その他のロック関数
+ */
+
+/*
+ *  プリエンプションしない自タスクのタスクロックの取得
+ */
+Inline PCB*
+acquire_tsk_lock_without_preemption_self(void)
+{
+	x_acquire_lock_without_preemption(&giant_lock);
+	return(get_my_p_pcb());
+} 
+  
+/*
+ *  プリエンプションしないタスクロックの取得（2段目）
+ */
+Inline PCB*
+acquire_nested_tsk_lock_without_preemption(TCB *p_tcb)
+{
+	return(p_tcb->p_pcb);
+}
+
+==========================================================================
+6. APIの例
+==========================================================================
+--------------------------------------------------------------------------
+○sig_sem
+--------------------------------------------------------------------------
+●Relase 1.0.1
+
+ER
+sig_sem(ID semid)
+{
+	SEMCB	*p_semcb;
+	TCB		*p_tcb;
+	ER		ercd;
+	bool_t	dspreq = false;
+
+	LOG_SIG_SEM_ENTER(semid);
+	CHECK_TSKCTX_UNL();
+	CHECK_SEMID(semid);
+	p_semcb = get_semcb(semid);
+
+  retry:
+	T_ACQUIRE_OBJ_LOCK(p_semcb);
+	if (!queue_empty(&(p_semcb->wait_queue))) {
+		p_tcb = (TCB *) (p_semcb->wait_queue.p_next);
+		T_ACQUIRE_NESTED_LOCK_AND_CHECK_MIG(p_tcb->p_pcb, p_semcb);
+		/* 待ちキューから削除する */
+		queue_delete((QUEUE *) p_tcb);
+		if (wait_complete(p_tcb)) {
+			dspreq = dispatch_request(p_tcb->p_pcb);
+		}
+		T_RELEASE_NESTED_LOCK(p_tcb->p_pcb);
+		ercd = E_OK;
+	}
+	else if (p_semcb->semcnt < p_semcb->p_seminib->maxsem) {
+		p_semcb->semcnt += 1;
+		ercd = E_OK;
+	}
+	else {
+		ercd = E_QOVR;
+	}
+	T_RELEASE_OBJ_LOCK_AND_DISPATCH(p_semcb, dspreq);
+
+  error_exit:
+	LOG_SIG_SEM_LEAVE(ercd);
+	return(ercd);
+}
+
+●Relase 1.1.0
+
+ER
+sig_sem(ID semid)
+{
+	SEMCB	*p_semcb;
+	TCB		*p_tcb;
+	ER		ercd;
+	bool_t	dspreq = false;
+	PCB *p_pcb
+
+	LOG_SIG_SEM_ENTER(semid);
+	CHECK_TSKCTX_UNL();
+	CHECK_SEMID(semid);
+	p_semcb = get_semcb(semid);
+
+	t_lock_cpu();    
+  retry:
+	t_acquire_obj_lock(&GET_OBJLOCK(p_semcb));
+	if (!queue_empty(&(p_semcb->wait_queue))) {
+		p_tcb = (TCB *) (p_semcb->wait_queue.p_next);
+		if (t_acquire_nested_lock(p_tcb, &GET_OBJLOCK(p_semcb), &p_pcb)) {
+			goto retry;
+		}
+		queue_delete((QUEUE *) p_tcb);
+		if (wait_complete(p_tcb)) {
+			dspreq = dispatch_request(p_pcb);
+		}
+		t_release_nested_tsk_lock(p_pcb);
+		ercd = E_OK;
+	}
+	else if (p_semcb->semcnt < p_semcb->p_seminib->maxsem) {
+		p_semcb->semcnt += 1;
+		ercd = E_OK;
+	}
+	else {
+		ercd = E_QOVR;
+	}
+	t_release_obj_lock_and_dispatch(&GET_OBJLOCK(p_semcb), dspreq);
+
+  error_exit:
+	LOG_SIG_SEM_LEAVE(ercd);
+	return(ercd);
+}
+--------------------------------------------------------------------------
+
+--------------------------------------------------------------------------
+○wai_sem
+--------------------------------------------------------------------------
+●Relase 1.0.1
+
+ER
+wai_sem(ID semid)
+{
+	SEMCB	*p_semcb;
+	ER		ercd;
+
+	LOG_WAI_SEM_ENTER(semid);
+	CHECK_DISPATCH();
+	CHECK_SEMID(semid);
+	p_semcb = get_semcb(semid);
+
+  retry:
+	T_ACQUIRE_OBJ_LOCK(p_semcb);
+	if (p_semcb->semcnt >= 1) {
+		p_semcb->semcnt -= 1;
+		RELEASE_OBJ_LOCK(p_semcb);
+		ercd = E_OK;
+	}
+	else {
+		T_ACQUIRE_NESTED_LOCK_AND_CHECK_RUNNABLE(p_semcb);
+		my_p_runtsk->tstat = (TS_WAITING | TS_WAIT_SEM);
+		wobj_make_wait((WOBJCB *) p_semcb);
+		T_RELEASE_NESTED_LOCK(my_p_runtsk->p_pcb);
+		RELEASE_OBJ_LOCK(p_semcb);
+		dispatch();
+		ercd = my_p_runtsk->wercd;
+	}
+	t_unlock_cpu();
+
+  error_exit:
+	LOG_WAI_SEM_LEAVE(ercd);
+	return(ercd);
+}
+
+●Relase 1.1.0
+
+ER
+wai_sem(ID semid)
+{
+	SEMCB	*p_semcb;
+	ER		ercd;
+	PCB		*my_p_pcb;
+
+	LOG_WAI_SEM_ENTER(semid);
+	CHECK_TSKCTX_UNL();
+	CHECK_SEMID(semid);
+	p_semcb = get_semcb(semid);
+
+	t_lock_cpu();
+	my_p_pcb = get_my_p_pcb();
+--------------------------------    
+	CHECK_DISPATCH(my_p_pcb);
+
+     or
+
+	if (!(my_p_pcb->dspflg)) {
+		ercd = E_CTX;
+		t_unlock_cpu();
+		goto error_exit;
+	}
+--------------------------------    
+
+  retry:
+	t_acquire_obj_lock(&GET_OBJLOCK(p_semcb));
+	if (p_semcb->semcnt >= 1) {
+		p_semcb->semcnt -= 1;
+		release_obj_lock(&GET_OBJLOCK(p_semcb));
+		ercd = E_OK;
+	}
+	else {
+		if (t_acquire_nested_lock_self(&GET_OBJLOCK(p_semcb), &my_p_pcb)) {
+			goto retry;
+		}
+		my_p_pcb->p_runtsk->tstat = (TS_WAITING | TS_WAIT_SEM);
+		wobj_make_wait((WOBJCB *) p_semcb);
+		t_release_nested_tsk_lock(my_p_pcb);
+		release_obj_lock(&GET_OBJLOCK(p_semcb));
+		dispatch();
+		ercd = my_p_pcb->p_runtsk->wercd;
+	}
+	t_unlock_cpu();
+
+  error_exit:
+	LOG_WAI_SEM_LEAVE(ercd);
+	return(ercd);
+}
+
+以上．

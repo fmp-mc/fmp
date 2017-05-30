@@ -1,0 +1,17 @@
+# Working directory is SDK root (tile-sdk)
+common/library/loadbalancer/include/loadbalancer.cfg
+common/library/loadbalancer/src/lb_tsk.c
+common/library/posix/include/pass0_cfg.h
+common/library/posix/include/posix.cfg
+common/library/posix/include/posix_cfg.h
+common/library/posix/src/posix_cfg.c
+../arch/tilegx_gcc/common/arch_debug.cfg
+../arch/tilegx_gcc/common/arch_ipi.cfg
+../arch/tilegx_gcc/common/arch_serial.cfg
+../arch/tilegx_gcc/common/arch_timer.cfg
+../arch/tilegx_gcc/common/pass0.cfg
+../arch/tilegx_gcc/common/pass0.makefile
+../arch/tilegx_gcc/common/tilegx.ld
+workspace/dedup/app.cfg
+workspace/test_spinlock/app.cfg
+workspace/test_barrier/app.cfg
