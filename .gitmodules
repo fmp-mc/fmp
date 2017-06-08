@@ -1,3 +1,6 @@
 [submodule "modules/parsec-3.0"]
 	path = modules/parsec-3.0
 	url = https://github.com/fmp-mc/parsec-3.0.git
+[submodule "modules/Hoard"]
+	path = modules/Hoard
+	url = https://github.com/fmp-mc/Hoard.git
