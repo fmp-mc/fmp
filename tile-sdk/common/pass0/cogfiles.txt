@@ -13,5 +13,5 @@ common/library/posix/src/posix_cfg.c
 ../arch/tilegx_gcc/common/pass0.makefile
 ../arch/tilegx_gcc/common/tilegx.ld
 workspace/dedup/app.cfg
-workspace/test_spinlock/app.cfg
-workspace/test_barrier/app.cfg
+#workspace/test_spinlock/app.cfg
+#workspace/test_barrier/app.cfg
